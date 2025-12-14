@@ -1,0 +1,44 @@
+{
+  "name": "watchlog_api",
+  "version": "1.0.0",
+  "description": "",
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint",
+      "prettier --check"
+    ],
+    "*.{json,yml,yaml,md}": [
+      "prettier --check"
+    ]
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx tsc",
+    "dev": "npx tsx --watch --env-file .env src/index.ts",
+    "start": "node --env-file .env dist/index.js",
+    "type-check": "npx tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@tsconfig/node24": "^24.0.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.1",
+    "eslint": "^9.39.2",
+    "eslint-plugin-perfectionist": "^4.15.1",
+    "prettier": "^3.7.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0"
+  }
+}
