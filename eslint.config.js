@@ -2,12 +2,15 @@
 
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
-import perfectionist from "eslint-plugin-perfectionist";
+import perfectionist, { rules } from "eslint-plugin-perfectionist";
 
 export default tseslint.config(
   {
     ignores: ["**/*.js"],
   },
+  rules: {
+  "@typescript-eslint/no-unsafe-assignment": "error"
+},
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
