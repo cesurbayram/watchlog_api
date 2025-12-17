@@ -80,4 +80,56 @@ const deleteUser = async (req: Request, res: Response) => {
   }
 };
 
-export { createUser, updateUser, deleteUser };
+const getUserById = async (req: Request, res: Response) => {
+  const userId = req.params.id;
+  try {
+    const dbRes = await dbPool.query(
+      `SELECT
+                u.id,
+                u.name,
+                u.last_name AS "lastName",
+                u.user_name AS "userName",
+                u.email,
+                u.role                                 
+            FROM users u
+            WHERE u.id = $1`,
+      [userId],
+    );
+
+    if (!dbRes.rowCount || !(dbRes.rowCount > 0)) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    const userData = dbRes.rows[0];
+
+    res.json(userData);
+  } catch (error) {
+    console.log("DB Error: ", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const getUsers = async (req: Request, res: Response) => {
+  try {
+    const userDbRes = await dbPool.query(`
+            SELECT 
+            u.id, 
+            u.name, 
+            u.last_name AS "lastName", 
+            u.user_name AS "userName", 
+            u.email, 
+            u.role
+        FROM 
+            "users" u
+        ORDER BY u.created_at DESC`);
+
+    const usersData = userDbRes.rows;
+
+    res.status(200).json(usersData);
+  } catch (error: any) {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export { createUser, updateUser, deleteUser, getUserById, getUsers };
