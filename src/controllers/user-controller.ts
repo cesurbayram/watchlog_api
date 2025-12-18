@@ -28,18 +28,18 @@ const createUser = async (req: Request, res: Response) => {
       [newUserId, name, lastName, userName, email, role, bcryptPassword],
     );
     await client.query("COMMIT");
-    res.status(201).json({ message: "User created successfully" });
+    return res.status(201).json({ message: "User created successfully" });
   } catch (error: any) {
     console.error("DB ERROR:", error.message);
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     client.release();
   }
 };
 
 const updateUser = async (req: Request, res: Response) => {
-  const userId = req.params.id;
+  const userId = req.params?.id;
   const { name, lastName, userName, email, role }: UserRequestDto = req.body;
   const client = await dbPool.connect();
 
@@ -52,11 +52,11 @@ const updateUser = async (req: Request, res: Response) => {
       [name, lastName, email, role, userName, userId],
     );
     await client.query("COMMIT");
-    res.status(200).json({ message: "User updated successfully" });
+    return res.status(200).json({ message: "User updated successfully" });
   } catch (error: any) {
     console.error("DB ERROR:", error.message);
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     client.release();
   }
@@ -70,11 +70,11 @@ const deleteUser = async (req: Request, res: Response) => {
     await client.query("BEGIN");
     await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await client.query("COMMIT");
-    res.status(200).json({ message: "User deleted successfully" });
+    return res.status(200).json({ message: "User deleted successfully" });
   } catch (error: any) {
     console.error("DB ERROR:", error.message);
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     client.release();
   }
@@ -97,13 +97,12 @@ const getUserById = async (req: Request, res: Response) => {
     );
 
     if (!dbRes.rowCount || !(dbRes.rowCount > 0)) {
-      res.status(404).json({ message: "User not found" });
-      return;
+      return res.status(404).json({ message: "User not found" });
     }
 
     const userData = dbRes.rows[0];
 
-    res.json(userData);
+    return res.json(userData);
   } catch (error) {
     console.log("DB Error: ", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -126,9 +125,9 @@ const getUsers = async (req: Request, res: Response) => {
 
     const usersData = userDbRes.rows;
 
-    res.status(200).json(usersData);
+    return res.status(200).json(usersData);
   } catch (error: any) {
-    res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
