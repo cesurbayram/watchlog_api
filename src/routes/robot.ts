@@ -10,6 +10,7 @@ import {
   getStatusHistory,
   updateRobot,
 } from "../controllers/robot-controller";
+import { getInputOutput } from "../controllers/input-output-controller";
 
 const robotRouter = Router();
 
@@ -23,5 +24,6 @@ robotRouter.get("/status-history", getStatusHistory);
 robotRouter.get("/status", getStatus);
 robotRouter.get("/:controllerId/alarms/:types", getAlarmsWithTypeByControllerId);
 robotRouter.get("/:controllerId/data/absodat", getAbsoDataWithControllerId);
+robotRouter.get("/:controllerId/input-output/:type", getInputOutput);
 
 export default robotRouter;
