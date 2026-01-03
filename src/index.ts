@@ -11,6 +11,11 @@ import notificationRoutes from "./routes/notification.js";
 import generalRegisterRoutes from "./routes/general-register.js";
 import generalSignalRoutes from "./routes/general-signal.js";
 import generalVariableRoutes from "./routes/general-variable.js";
+import dashboardRoutes from "./routes/dashboard.js";
+import jobRoutes from "./routes/job.js";
+import shiftMaintenanceRoutes from "./routes/shift-maintenance.js";
+import systemInfoRoutes from "./routes/system-info.js";
+import systemExpectationRoutes from "./routes/system-expectation.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -27,6 +32,11 @@ app.use("/api/notification", notificationRoutes);
 app.use("/api/general-register", generalRegisterRoutes);
 app.use("/api/general-signal", generalSignalRoutes);
 app.use("/api/general-variable", generalVariableRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/job", jobRoutes);
+app.use("/api/shift-maintenance", shiftMaintenanceRoutes);
+app.use("/api/system-info", systemInfoRoutes);
+app.use("/api/system-expectations", systemExpectationRoutes);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);

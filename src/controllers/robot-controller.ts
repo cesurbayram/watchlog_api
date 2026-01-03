@@ -525,7 +525,7 @@ const getStatusHistory = async (req: Request, res: Response) => {
 };
 
 const getStatus = async (req: Request, res: Response) => {
-  const { controllerId } = req.params;
+  const { controllerId } = req.query;
 
   if (!controllerId) {
     return res.status(400).json({ error: "Controller ID is required" });

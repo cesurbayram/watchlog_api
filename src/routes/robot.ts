@@ -11,6 +11,8 @@ import {
   updateRobot,
 } from "../controllers/robot-controller";
 import { getInputOutput } from "../controllers/input-output-controller";
+import { getUtilizationByControllerId } from "../controllers/utilzation-controller";
+import { getVariableByControllerId } from "../controllers/variable-controller";
 
 const robotRouter = Router();
 
@@ -25,5 +27,7 @@ robotRouter.get("/status", getStatus);
 robotRouter.get("/:controllerId/alarms/:types", getAlarmsWithTypeByControllerId);
 robotRouter.get("/:controllerId/data/absodat", getAbsoDataWithControllerId);
 robotRouter.get("/:controllerId/input-output/:type", getInputOutput);
+robotRouter.get("/:controllerId/utilization", getUtilizationByControllerId);
+robotRouter.get("/:controllerId/variables", getVariableByControllerId);
 
 export default robotRouter;
