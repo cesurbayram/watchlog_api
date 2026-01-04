@@ -9,7 +9,7 @@ const getGeneralVariables = async (req: Request, res: Response) => {
     if (tableName && generalNo) {
       const validTables = ["general_byte_data", "general_int_data", "general_double_data", "general_real_data", "general_string_data"];
 
-      if (!validTables.includes(tableName)) {
+      if (!validTables.includes(tableName as string)) {
         return res.status(400).json({ message: "Invalid table name" });
       }
 
@@ -26,7 +26,7 @@ const getGeneralVariables = async (req: Request, res: Response) => {
       return res.status(404).json({ value: null });
     }
 
-    if (!type || !["byte", "int", "double", "real", "string"].includes(type)) {
+    if (!type || !["byte", "int", "double", "real", "string"].includes(type as string)) {
       return res.status(400).json({
         message: "Invalid or missing variable type. Must be one of: byte, int, double, real, string",
       });
@@ -40,7 +40,7 @@ const getGeneralVariables = async (req: Request, res: Response) => {
       string: "general_string_data",
     };
 
-    const tableNameFromType = tableMap[type];
+    const tableNameFromType = tableMap[type as string];
 
     const dbRes = await dbPool.query(
       `SELECT 

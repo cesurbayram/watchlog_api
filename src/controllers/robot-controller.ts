@@ -290,9 +290,9 @@ const getStatusHistory = async (req: Request, res: Response) => {
     }
 
     const targetDate = date || new Date().toISOString().split("T")[0];
-    const endDate = new Date(targetDate);
-    const startDate = new Date(targetDate);
-    startDate.setDate(startDate.getDate() - parseInt(days) + 1);
+    const endDate = new Date(targetDate as string | number);
+    const startDate = new Date(targetDate as string | number);
+    startDate.setDate(startDate.getDate() - parseInt(days as string) + 1);
 
     const shiftCrossesMidnight = startTime > endTime;
 
