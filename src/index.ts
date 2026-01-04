@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 
 import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/user.js";
@@ -21,22 +22,24 @@ const app = express();
 const port = process.env.PORT ?? "3001";
 
 app.use(express.json());
-app.use("/api/auth", authRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/cell", cellRoutes);
-app.use("/api/line", lineRoutes);
-app.use("/api/factory", factoryRoutes);
-app.use("/api/shift", shiftRoutes);
-app.use("/api/robot", robotRoutes);
-app.use("/api/notification", notificationRoutes);
-app.use("/api/general-register", generalRegisterRoutes);
-app.use("/api/general-signal", generalSignalRoutes);
-app.use("/api/general-variable", generalVariableRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/job", jobRoutes);
-app.use("/api/shift-maintenance", shiftMaintenanceRoutes);
-app.use("/api/system-info", systemInfoRoutes);
-app.use("/api/system-expectations", systemExpectationRoutes);
+app.use(cors());
+
+app.use("/api-v2/auth", authRoutes);
+app.use("/api-v2/user", userRoutes);
+app.use("/api-v2/cell", cellRoutes);
+app.use("/api-v2/line", lineRoutes);
+app.use("/api-v2/factory", factoryRoutes);
+app.use("/api-v2/shift", shiftRoutes);
+app.use("/api-v2/robot", robotRoutes);
+app.use("/api-v2/notification", notificationRoutes);
+app.use("/api-v2/general-register", generalRegisterRoutes);
+app.use("/api-v2/general-signal", generalSignalRoutes);
+app.use("/api-v2/general-variable", generalVariableRoutes);
+app.use("/api-v2/dashboard", dashboardRoutes);
+app.use("/api-v2/job", jobRoutes);
+app.use("/api-v2/shift-maintenance", shiftMaintenanceRoutes);
+app.use("/api-v2/system-info", systemInfoRoutes);
+app.use("/api-v2/system-expectations", systemExpectationRoutes);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);

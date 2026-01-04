@@ -29,6 +29,7 @@
   "dependencies": {
     "archiver": "^7.0.1",
     "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
     "csv-parse": "^5.6.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
@@ -40,6 +41,7 @@
     "@tsconfig/node24": "^24.0.3",
     "@types/archiver": "^7.0.0",
     "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.1",
