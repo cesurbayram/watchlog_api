@@ -26,14 +26,14 @@ const login = async (req: Request, res: Response) => {
     );
 
     if (userDbRes.rowCount === 0) {
-      res.status(400).json({ message: "User does not exist!" });
+      return res.status(400).json({ message: "User does not exist!" });
     }
 
     const userData = userDbRes.rows[0];
     const isPasswordMatch = await bcrypt.compare(password, userData.bcryptPassword ? userData.bcryptPassword : "");
 
     if (!isPasswordMatch) {
-      res.status(400).json({ message: "Wrong password!" });
+      return res.status(400).json({ message: "Wrong password!" });
     }
 
     const tokenData = {
@@ -54,12 +54,12 @@ const login = async (req: Request, res: Response) => {
       expiresIn: 24 * 60 * 60,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "User is signed in successfully",
-      body: token,
+      body: { token, user: userData },
     });
   } catch (error: any) {
-    res.status(500).json({ error: error?.message });
+    return res.status(500).json({ error: error?.message });
   }
 };
 

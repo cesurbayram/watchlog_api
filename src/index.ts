@@ -17,6 +17,7 @@ import jobRoutes from "./routes/job.js";
 import shiftMaintenanceRoutes from "./routes/shift-maintenance.js";
 import systemInfoRoutes from "./routes/system-info.js";
 import systemExpectationRoutes from "./routes/system-expectation.js";
+import auth from "./middleware/auth-middleware.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -25,6 +26,8 @@ app.use(express.json());
 app.use(cors());
 
 app.use("/api-v2/auth", authRoutes);
+
+app.use(auth);
 app.use("/api-v2/user", userRoutes);
 app.use("/api-v2/cell", cellRoutes);
 app.use("/api-v2/line", lineRoutes);

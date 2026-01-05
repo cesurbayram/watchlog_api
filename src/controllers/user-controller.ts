@@ -17,7 +17,7 @@ const createUser = async (req: Request, res: Response) => {
     const checkUser = await client.query(`SELECT * FROM users WHERE email = $1`, [email]);
 
     if (checkUser.rowCount && checkUser.rowCount > 0) {
-      res.status(400).json({ message: "User already exist!" });
+      return res.status(400).json({ message: "User already exist!" });
     }
 
     const bcryptPassword = password && (await bcrypt.hash(password, saltRounds));
