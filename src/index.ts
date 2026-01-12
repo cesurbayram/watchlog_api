@@ -18,6 +18,8 @@ import shiftMaintenanceRoutes from "./routes/shift-maintenance.js";
 import systemInfoRoutes from "./routes/system-info.js";
 import systemExpectationRoutes from "./routes/system-expectation.js";
 import auth from "./middleware/auth-middleware.js";
+import mailRoutes from "./routes/mail.js";
+import { startCronJobs } from "./schedule-job/schedule-cron.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -43,6 +45,9 @@ app.use("/api-v2/job", jobRoutes);
 app.use("/api-v2/shift-maintenance", shiftMaintenanceRoutes);
 app.use("/api-v2/system-info", systemInfoRoutes);
 app.use("/api-v2/system-expectations", systemExpectationRoutes);
+app.use("/api-v2/mail", mailRoutes);
+
+startCronJobs();
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
