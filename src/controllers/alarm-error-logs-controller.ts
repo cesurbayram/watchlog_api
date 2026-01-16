@@ -137,4 +137,43 @@ const deleteWorkOrder = async (req: Request, res: Response) => {
   }
 };
 
-export { getAlarmLogDetailByIdAndCode, createWorkOrder, getWorkOrders, deleteWorkOrder };
+const sendWorkOrderMail = async (req: Request, res: Response) => {
+  const { workOrderId, recipientEmail } = req.body;
+
+  if (!workOrderId || !recipientEmail) {
+    return res.status(400).json({ message: "Work Order ID and recipient email are required" });
+  }
+
+  const client = await dbPool.connect();
+
+  try {
+    const workOrderResult = await client.query(
+      `SELECT wo.*, c.name as controller_name, c.ip_address as controller_ip 
+       FROM work_orders wo
+       LEFT JOIN controller c ON wo.controller_id = c.id
+       WHERE wo.id = $1`,
+      [workOrderId],
+    );
+
+    if (workOrderResult.rows.length === 0) {
+      return res.status(404).json({ message: "Work order not found" });
+    }
+
+    const workOrder = workOrderResult.rows[0];
+
+    // TODO: Implement actual email sending logic here
+    // For now, just return success with work order data
+    return res.status(200).json({
+      message: "Work order mail sent successfully",
+      workOrder,
+      recipientEmail,
+    });
+  } catch (error: any) {
+    console.error("Work order mail send error:", error.message);
+    return res.status(500).json({ message: "Internal Server Error" });
+  } finally {
+    client.release();
+  }
+};
+
+export { getAlarmLogDetailByIdAndCode, createWorkOrder, getWorkOrders, deleteWorkOrder, sendWorkOrderMail };

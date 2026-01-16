@@ -209,11 +209,13 @@ const createZipBySessionId = async (req: Request, res: Response) => {
 
     // Kategori bazlı ise her zaman yeni ZIP oluştur, değilse cache kullan
     if (!fileFilter && fs.existsSync(zipFilePath)) {
-      return res.status(400).json({
+      const existingStats = fs.statSync(zipFilePath);
+      return res.status(200).json({
         success: true,
         message: "ZIP file already exists",
         zipFileName,
         fileCount: filesResult.rows.length,
+        zipSizeBytes: existingStats.size,
       });
     }
 
@@ -354,67 +356,47 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
     const stats = fs.statSync(zipFilePath);
     const fileName = path.basename(zipFilePath);
 
+    // Set headers for file download
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", stats.size.toString());
+    res.setHeader("Cache-Control", "no-cache");
+
+    // Create read stream and pipe to response
     const fileStream = fs.createReadStream(zipFilePath);
     const zipPathToDelete = zipFilePath;
 
-    const stream = new ReadableStream({
-      start(controller) {
-        fileStream.on("data", (chunk: Buffer) => {
-          controller.enqueue(new Uint8Array(chunk));
-        });
-
-        fileStream.on("end", () => {
-          controller.close();
-
-          setTimeout(() => {
-            try {
-              if (fs.existsSync(zipPathToDelete)) {
-                fs.unlinkSync(zipPathToDelete);
-                console.log(`Cleaned up temporary ZIP: ${zipPathToDelete}`);
-              }
-            } catch (cleanupError) {
-              console.error("Error cleaning up ZIP file:", cleanupError);
-            }
-          }, 1000);
-        });
-
-        fileStream.on("error", (error: Error) => {
-          console.error("Stream error:", error);
-          controller.error(error);
-
-          try {
-            if (fs.existsSync(zipPathToDelete)) {
-              fs.unlinkSync(zipPathToDelete);
-              console.log(`Cleaned up ZIP after error: ${zipPathToDelete}`);
-            }
-          } catch (cleanupError) {
-            console.error("Error cleaning up ZIP file:", cleanupError);
-          }
-        });
-      },
-      cancel() {
-        fileStream.destroy();
+    fileStream.on("end", () => {
+      // Clean up ZIP file after download
+      setTimeout(() => {
         try {
           if (fs.existsSync(zipPathToDelete)) {
             fs.unlinkSync(zipPathToDelete);
-            console.log(`Cleaned up ZIP after cancel: ${zipPathToDelete}`);
+            console.log(`Cleaned up temporary ZIP: ${zipPathToDelete}`);
           }
         } catch (cleanupError) {
           console.error("Error cleaning up ZIP file:", cleanupError);
         }
-      },
+      }, 1000);
     });
 
-    const headers = new Headers();
-    headers.set("Content-Type", "application/zip");
-    headers.set("Content-Disposition", `attachment; filename="${fileName}"`);
-    headers.set("Content-Length", stats.size.toString());
-    headers.set("Cache-Control", "no-cache");
-
-    return res.status(200).json({
-      stream,
-      headers: headers,
+    fileStream.on("error", (error: Error) => {
+      console.error("Stream error:", error);
+      try {
+        if (fs.existsSync(zipPathToDelete)) {
+          fs.unlinkSync(zipPathToDelete);
+          console.log(`Cleaned up ZIP after error: ${zipPathToDelete}`);
+        }
+      } catch (cleanupError) {
+        console.error("Error cleaning up ZIP file:", cleanupError);
+      }
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error streaming file" });
+      }
     });
+
+    // Pipe the file stream to response
+    fileStream.pipe(res);
   } catch (error) {
     console.error("Error downloading ZIP:", error);
 
@@ -427,7 +409,9 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
       }
     }
 
-    return res.status(500).json({ error: "Failed to download ZIP file" });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "Failed to download ZIP file" });
+    }
   }
 };
 

@@ -1,0 +1,297 @@
+import { Request, Response } from "express";
+import { dbPool } from "../config/db";
+import path from "path";
+import os from "os";
+import fs from "fs";
+import { LogEntry } from "../models/log-content";
+import { parseLogContent } from "../utils/cmos-backup";
+
+// Types
+interface TeachingEvent {
+  index: number;
+  date: string;
+  type: "POINT_MODIFICATION" | "INSTRUCTION_INSERT" | "INSTRUCTION_DELETE" | "TEACH_MODE";
+  fileName?: string;
+  lineNumber?: string;
+  details: string;
+  rawEntry: string;
+  controllerId?: string;
+  controllerName?: string;
+}
+
+interface FileModification {
+  fileName: string;
+  count: number;
+  lastTeachingDate: string;
+  lastEvent: TeachingEvent;
+}
+
+interface TeachingStatistics {
+  totalTeachingEvents: number;
+  pointModifications: number;
+  instructionInserts: number;
+  instructionDeletes: number;
+  teachModeActivations: number;
+  lastTeachingDate?: string;
+  mostModifiedFiles: FileModification[];
+}
+
+interface TeachingLogsResponse {
+  success: boolean;
+  events: TeachingEvent[];
+  statistics: TeachingStatistics | null;
+  error?: string;
+  controllerId?: string;
+  controllerName?: string;
+  lastModified?: string;
+}
+
+// Extract teaching events from log entries
+const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: string, controllerName?: string): TeachingEvent[] => {
+  const events: TeachingEvent[] = [];
+
+  logEntries.forEach((entry) => {
+    const event = entry.event?.toLowerCase() || "";
+
+    if (event.includes("job edit(p. mod)")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "POINT_MODIFICATION",
+        fileName: entry.fields["FILE NAME"],
+        lineNumber: entry.fields["LINE"],
+        details: `Point modified in ${entry.fields["FILE NAME"]} at line ${entry.fields["LINE"]}`,
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event.includes("job edit(ins)")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "INSTRUCTION_INSERT",
+        fileName: entry.fields["FILE NAME"],
+        lineNumber: entry.fields["LINE"],
+        details: `Instruction inserted: ${entry.fields["AFTER EDIT"] || "Unknown"}`,
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event.includes("job edit(del)")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "INSTRUCTION_DELETE",
+        fileName: entry.fields["FILE NAME"],
+        lineNumber: entry.fields["LINE"],
+        details: `Instruction deleted: ${entry.fields["DELETED LINE"] || "Unknown"}`,
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event.includes("teach mode")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "TEACH_MODE",
+        details: "Robot entered teach mode",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    }
+  });
+
+  return events.sort((a, b) => a.index - b.index);
+};
+
+// Calculate statistics from teaching events
+const calculateStatistics = (events: TeachingEvent[]): TeachingStatistics => {
+  const fileModifications: {
+    [key: string]: {
+      count: number;
+      lastDate: string;
+      lastEvent: TeachingEvent;
+    };
+  } = {};
+
+  events.forEach((event) => {
+    if (event.fileName) {
+      if (!fileModifications[event.fileName]) {
+        fileModifications[event.fileName] = {
+          count: 0,
+          lastDate: event.date,
+          lastEvent: event,
+        };
+      }
+      fileModifications[event.fileName].count += 1;
+
+      if (event.index < fileModifications[event.fileName].lastEvent.index) {
+        fileModifications[event.fileName].lastDate = event.date;
+        fileModifications[event.fileName].lastEvent = event;
+      }
+    }
+  });
+
+  const mostModifiedFiles = Object.entries(fileModifications)
+    .map(([fileName, data]) => ({
+      fileName,
+      count: data.count,
+      lastTeachingDate: data.lastDate,
+      lastEvent: data.lastEvent,
+    }))
+    .sort((a, b) => {
+      const dateComparison = new Date(b.lastTeachingDate).getTime() - new Date(a.lastTeachingDate).getTime();
+      if (dateComparison !== 0) return dateComparison;
+      return b.count - a.count;
+    })
+    .slice(0, 5);
+
+  return {
+    totalTeachingEvents: events.length,
+    pointModifications: events.filter((e) => e.type === "POINT_MODIFICATION").length,
+    instructionInserts: events.filter((e) => e.type === "INSTRUCTION_INSERT").length,
+    instructionDeletes: events.filter((e) => e.type === "INSTRUCTION_DELETE").length,
+    teachModeActivations: events.filter((e) => e.type === "TEACH_MODE").length,
+    lastTeachingDate: events.length > 0 ? events[0].date : undefined,
+    mostModifiedFiles,
+  };
+};
+
+// Get teaching logs for a single controller
+export const getTeachingLogsByControllerId = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    // Handle "all" - aggregate all controllers
+    if (controllerId === "all") {
+      return await handleAllControllersTeaching(req, res);
+    }
+
+    const controllerQuery = `SELECT id, ip_address, name FROM controller WHERE id = $1`;
+    const controllerResult = await dbPool.query(controllerQuery, [controllerId]);
+
+    if (controllerResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Controller not found" });
+    }
+
+    const controller = controllerResult.rows[0];
+    const ipAddress = controller.ip_address;
+    const controllerName = controller.name;
+
+    const fileName = "LOGDATA.DAT";
+    const folderName = `${ipAddress}_LOGDATA`;
+
+    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+
+    const filePath = path.join(baseDir, folderName, fileName);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).json({
+        success: false,
+        error: "Log file not found. Please fetch log data first.",
+        events: [],
+        statistics: null,
+      });
+    }
+
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+    const stats = fs.statSync(filePath);
+
+    const logEntries = parseLogContent(fileContent);
+    const teachingEvents = extractTeachingEvents(logEntries, controllerId, controllerName);
+    const statistics = calculateStatistics(teachingEvents);
+
+    const response: TeachingLogsResponse = {
+      success: true,
+      events: teachingEvents,
+      statistics,
+      controllerId,
+      controllerName,
+      lastModified: stats.mtime.toISOString(),
+    };
+
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error("Error fetching teaching logs:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch teaching logs: ${error instanceof Error ? error.message : "Unknown error"}`,
+      events: [],
+      statistics: null,
+    });
+  }
+};
+
+// Handle all controllers aggregation
+const handleAllControllersTeaching = async (req: Request, res: Response) => {
+  try {
+    const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
+    const controllersResult = await dbPool.query(controllersQuery);
+
+    if (controllersResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "No controllers found in the system",
+        events: [],
+        statistics: null,
+      });
+    }
+
+    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+
+    const fileName = "LOGDATA.DAT";
+    let allTeachingEvents: TeachingEvent[] = [];
+    let lastModifiedDate: Date | null = null;
+    let processedCount = 0;
+
+    for (const controller of controllersResult.rows) {
+      const folderName = `${controller.ip_address}_LOGDATA`;
+      const filePath = path.join(baseDir, folderName, fileName);
+
+      if (fs.existsSync(filePath)) {
+        try {
+          const fileContent = fs.readFileSync(filePath, "utf-8");
+          const stats = fs.statSync(filePath);
+
+          if (!lastModifiedDate || stats.mtime > lastModifiedDate) {
+            lastModifiedDate = stats.mtime;
+          }
+
+          const logEntries = parseLogContent(fileContent);
+          const teachingEvents = extractTeachingEvents(logEntries, controller.id, controller.name);
+          allTeachingEvents = allTeachingEvents.concat(teachingEvents);
+          processedCount++;
+        } catch (error) {
+          console.error(`Error reading log for controller ${controller.name}:`, error);
+        }
+      }
+    }
+
+    // Sort by index
+    allTeachingEvents.sort((a, b) => a.index - b.index);
+
+    const statistics = calculateStatistics(allTeachingEvents);
+
+    const response: TeachingLogsResponse = {
+      success: true,
+      events: allTeachingEvents,
+      statistics,
+      lastModified: lastModifiedDate?.toISOString() || new Date().toISOString(),
+    };
+
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error("Error aggregating teaching logs:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to aggregate teaching logs: ${error instanceof Error ? error.message : "Unknown error"}`,
+      events: [],
+      statistics: null,
+    });
+  }
+};
