@@ -100,7 +100,6 @@ export function parseLogContent(content: string): LogEntry[] {
 
 export async function handleAllControllers(): Promise<Response<LogFileContentResponse>> {
   try {
-    // Fetch all controllers
     const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
     const controllersResult = await dbPool.query(controllersQuery);
 
@@ -119,7 +118,6 @@ export async function handleAllControllers(): Promise<Response<LogFileContentRes
     let processedCount = 0;
     let skippedControllers: string[] = [];
 
-    // Read and parse each controller's LOGDATA.DAT
     for (const controller of controllersResult.rows) {
       const folderName = `${controller.ip_address}_LOGDATA`;
       const filePath = path.join(baseDir, folderName, fileName);
@@ -129,14 +127,12 @@ export async function handleAllControllers(): Promise<Response<LogFileContentRes
           const fileContent = fs.readFileSync(filePath, "utf-8");
           const stats = fs.statSync(filePath);
 
-          // Track most recent modification
           if (!lastModifiedDate || stats.mtime > lastModifiedDate) {
             lastModifiedDate = stats.mtime;
           }
 
           const logEntries = parseLogContent(fileContent);
 
-          // Add controller info to each entry for identification
           const entriesWithController = logEntries.map((entry) => ({
             ...entry,
             controllerId: controller.id,
@@ -155,7 +151,6 @@ export async function handleAllControllers(): Promise<Response<LogFileContentRes
       }
     }
 
-    // Sort all entries by index (descending - newest first)
     allLogEntries.sort((a, b) => b.index - a.index);
 
     console.log(`Aggregate log data: ${processedCount} controllers processed, ${allLogEntries.length} total entries`);

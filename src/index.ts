@@ -17,6 +17,14 @@ import jobRoutes from "./routes/job.js";
 import shiftMaintenanceRoutes from "./routes/shift-maintenance.js";
 import systemInfoRoutes from "./routes/system-info.js";
 import systemExpectationRoutes from "./routes/system-expectation.js";
+import arcFunctionRoutes from "./routes/arc-function.js";
+import cameraRoutes from "./routes/camera.js";
+import homeRoutes from "./routes/home.js";
+import jobFileContentRoutes from "./routes/job-file-content.js";
+import productionTrackingRoutes from "./routes/production-tracking.js";
+import quickAssistRoutes from "./routes/quick-assist.js";
+import systemReportsRoutes from "./routes/system-reports.js";
+import weldRoutes from "./routes/weld.js";
 import auth from "./middleware/auth-middleware.js";
 
 const app = express();
@@ -43,6 +51,14 @@ app.use("/api-v2/job", jobRoutes);
 app.use("/api-v2/shift-maintenance", shiftMaintenanceRoutes);
 app.use("/api-v2/system-info", systemInfoRoutes);
 app.use("/api-v2/system-expectations", systemExpectationRoutes);
+app.use("/api-v2/arc-function", arcFunctionRoutes);
+app.use("/api-v2/camera", cameraRoutes);
+app.use("/api-v2/home", homeRoutes);
+app.use("/api-v2/job-file-content", jobFileContentRoutes);
+app.use("/api-v2/production-tracking", productionTrackingRoutes);
+app.use("/api-v2/quick-assist", quickAssistRoutes);
+app.use("/api-v2/system-reports", systemReportsRoutes);
+app.use("/api-v2/weld", weldRoutes);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);

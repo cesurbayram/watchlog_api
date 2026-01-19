@@ -111,4 +111,31 @@ const getJobById = async (req: Request, res: Response) => {
   }
 };
 
-export { getJobFileContent, getJobs, getJobById };
+const getJobsByControllerId = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  try {
+    const result = await dbPool.query(
+      `
+        SELECT 
+          id,
+          controller_id,
+          job_name,
+          current_line,
+          job_content,
+          created_at
+        FROM jobs 
+        WHERE controller_id = $1 
+        ORDER BY created_at DESC
+      `,
+      [controllerId],
+    );
+
+    return res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.error("Jobs fetch error:", error.message);
+    return res.status(500).json({ error: "Jobs getirilemedi" });
+  }
+};
+
+export { getJobFileContent, getJobs, getJobById, getJobsByControllerId };
