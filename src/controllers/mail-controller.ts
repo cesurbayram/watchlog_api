@@ -2,12 +2,16 @@ import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import { v4 as uuidv4 } from "uuid";
 import { sendMail } from "../services/mail-service";
+import { SendMailHandlerRequestDto } from "../models/mail-dto";
 
 const sendMailHandler = async (req: Request, res: Response) => {
-  const { email, message } = req.body;
+  const { emailList, message, subject }: SendMailHandlerRequestDto = req.body;
 
   try {
-    await sendMail({ email, message });
+    for (const email of emailList) {
+      await sendMail({ email, message, subject });
+    }
+
     return res.status(200).json({ message: "Email sent successfully!" });
   } catch (error) {
     console.error("An error occured while sent email" + error);

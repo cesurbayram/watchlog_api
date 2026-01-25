@@ -12,13 +12,14 @@ const transporter = nodemailer.createTransport({
 interface SendMailProps {
   email: string;
   message: string;
+  subject: string;
 }
 
-export const sendMail = async ({ email, message }: SendMailProps): Promise<void> => {
+export const sendMail = async ({ email, message, subject }: SendMailProps): Promise<void> => {
   await transporter.sendMail({
     from: process.env.FROM_EMAIL,
     to: email,
-    subject: "New message for test",
+    subject: subject,
     text: message,
     replyTo: email,
   });
