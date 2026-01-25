@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
+import { getMaintenanceIntervals } from "../utils/robot-maintenance-intervals";
+import { parseSystemFile } from "../utils/parse-system-file";
+import path from "path";
+import os from "os";
+import fs from "fs";
 
 interface AlarmStats {
   hourlyData: { hour: string; count: number }[];
@@ -487,29 +492,83 @@ const getStats = async (req: Request, res: Response) => {
 
     let maintenanceCount = 0;
     try {
+      // Get all controllers with their current servo hours
+      const controllersResult = await dbPool.query(`
+        SELECT 
+          c.id,
+          c.name,
+          c.model,
+          c.ip_address,
+          u.servo_power_time
+        FROM controller c
+        LEFT JOIN (
+          SELECT controller_id, servo_power_time,
+            ROW_NUMBER() OVER (PARTITION BY controller_id ORDER BY created_at DESC) as rn
+          FROM utilization_data
+        ) u ON c.id = u.controller_id AND u.rn = 1
+      `);
+
       const maintenanceResult = await dbPool.query(`
-            SELECT COUNT(DISTINCT mp.controller_id) as maintenance_required
-            FROM maintenance_plan mp
-            WHERE mp.next_maintenance_time IS NOT NULL
-              AND mp.next_maintenance_time != ''
-              AND (
-                TO_TIMESTAMP(mp.next_maintenance_time, 'DD.MM.YYYY HH24:MI:SS') <= CURRENT_TIMESTAMP + INTERVAL '7 days'
-                OR TO_TIMESTAMP(mp.next_maintenance_time, 'DD.MM.YYYY HH24:MI:SS') < CURRENT_TIMESTAMP
-              )
-          `);
-      maintenanceCount = parseInt(maintenanceResult.rows[0]?.maintenance_required) || 0;
-    } catch (err) {
-      try {
-        const simpleCheck = await dbPool.query(`
-              SELECT COUNT(DISTINCT controller_id) as maintenance_required
-              FROM maintenance_plan
-              WHERE next_maintenance_time IS NOT NULL
-            `);
-        maintenanceCount = parseInt(simpleCheck.rows[0]?.maintenance_required) || 0;
-      } catch (err2) {
-        console.log("Maintenance table check skipped");
-        maintenanceCount = 0;
+        SELECT DISTINCT ON (controller_id) 
+          controller_id, servo_hours, maintenance_date
+        FROM maintenance_history
+        WHERE maintenance_type LIKE '%General Maintenance%'
+        ORDER BY controller_id, maintenance_date DESC
+      `);
+
+      const lastMaintenanceMap = new Map();
+      maintenanceResult.rows.forEach((row: any) => {
+        lastMaintenanceMap.set(row.controller_id, row.servo_hours || 0);
+      });
+
+      const baseDir =
+        process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+
+      // Calculate maintenance status for each controller
+      for (const controller of controllersResult.rows) {
+        const currentHours = controller.servo_power_time || 0;
+        const lastMaintenanceHours = lastMaintenanceMap.get(controller.id) || 0;
+        const hoursSinceLastMaintenance = currentHours - lastMaintenanceHours;
+
+        // Get robot model from system file
+        let robotModel = null;
+        try {
+          const systemInfoDir = path.join(baseDir, `${controller.ip_address}_SYSTEM`);
+          if (fs.existsSync(systemInfoDir)) {
+            const files = fs.readdirSync(systemInfoDir);
+            const systemFiles = files.filter(
+              (file: string) => file.toUpperCase().includes("SYSTEM") && (file.endsWith(".SYS") || file.endsWith(".sys")),
+            );
+            if (systemFiles.length > 0) {
+              const latestFile = systemFiles
+                .map((fileName: string) => {
+                  const filePath = path.join(systemInfoDir, fileName);
+                  const stats = fs.statSync(filePath);
+                  return { fileName, filePath, mtime: stats.mtime };
+                })
+                .sort((a: any, b: any) => b.mtime.getTime() - a.mtime.getTime())[0];
+              const content = fs.readFileSync(latestFile.filePath, "utf8");
+              const parsedInfo = parseSystemFile(content);
+              robotModel = parsedInfo.robotModel || null;
+            }
+          }
+        } catch (err) {
+          // Ignore file read errors
+        }
+
+        // Get maintenance interval based on robot model
+        const intervals = getMaintenanceIntervals(robotModel, controller.model);
+        const targetHours = intervals.periodicMaintenance;
+        const warningThreshold = targetHours * 0.9;
+
+        // Check if WARNING or OVERDUE
+        if (hoursSinceLastMaintenance >= warningThreshold) {
+          maintenanceCount++;
+        }
       }
+    } catch (err) {
+      console.log("Maintenance calculation error:", err);
+      maintenanceCount = 0;
     }
 
     const stats = result.rows[0];
