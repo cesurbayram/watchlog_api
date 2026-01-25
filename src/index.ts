@@ -26,6 +26,8 @@ import quickAssistRoutes from "./routes/quick-assist.js";
 import systemReportsRoutes from "./routes/system-reports.js";
 import weldRoutes from "./routes/weld.js";
 import auth from "./middleware/auth-middleware.js";
+import mailRoutes from "./routes/mail.js";
+import { startCronJobs } from "./schedule-job/schedule-cron.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -59,6 +61,9 @@ app.use("/api-v2/production-tracking", productionTrackingRoutes);
 app.use("/api-v2/quick-assist", quickAssistRoutes);
 app.use("/api-v2/system-reports", systemReportsRoutes);
 app.use("/api-v2/weld", weldRoutes);
+app.use("/api-v2/mail", mailRoutes);
+
+startCronJobs();
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
