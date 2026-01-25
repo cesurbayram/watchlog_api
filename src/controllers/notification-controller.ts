@@ -29,7 +29,7 @@ const getNotifications = async (req: Request, res: Response) => {
 const createNotification = async (req: Request, res: Response) => {
   const { type, title, message, data, user_id } = req.body;
 
-  if (type || title || message) {
+  if (!type || !title || !message) {
     return res.status(400).json({ error: "Missing required fields: type, title, message" });
   }
 
@@ -47,20 +47,17 @@ const createNotification = async (req: Request, res: Response) => {
 
     const newNotification = result.rows[0];
 
-    // try {
-    //   await fetch(`${process.env.NOTIFICATION_SERVER_URL}/notify`, {
-    //     method: "POST",
-    //     headers: {
-    //       "Content-Type": "application/json",
-    //     },
-    //     body: JSON.stringify(newNotification),
-    //   });
-    // } catch (error) {
-    //   console.error(
-    //     "Error sending notification to notification server:",
-    //     error
-    //   );
-    // }
+    try {
+      await fetch(`${process.env.NOTIFICATION_SERVER_URL}/notify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newNotification),
+      });
+    } catch (error) {
+      console.error("Error sending notification to notification server:", error);
+    }
 
     return res.status(201).json(newNotification);
   } catch (error) {

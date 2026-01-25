@@ -36,6 +36,7 @@ app.use(express.json());
 app.use(cors());
 
 app.use("/api-v2/auth", authRoutes);
+app.use("/api-v2/notification", notificationRoutes);
 
 app.use(auth);
 app.use("/api-v2/user", userRoutes);
@@ -44,7 +45,6 @@ app.use("/api-v2/line", lineRoutes);
 app.use("/api-v2/factory", factoryRoutes);
 app.use("/api-v2/shift", shiftRoutes);
 app.use("/api-v2/robot", robotRoutes);
-app.use("/api-v2/notification", notificationRoutes);
 app.use("/api-v2/general-register", generalRegisterRoutes);
 app.use("/api-v2/general-signal", generalSignalRoutes);
 app.use("/api-v2/general-variable", generalVariableRoutes);
