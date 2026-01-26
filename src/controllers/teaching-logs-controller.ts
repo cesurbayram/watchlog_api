@@ -228,7 +228,7 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
       });
       savedToDb = true;
       newEventsCount = saveResult.newEventsCount;
-      console.log(`Teaching events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+      //console.log(`Teaching events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
     } catch (dbError) {
       console.error("Error saving teaching events to DB:", dbError);
     }
