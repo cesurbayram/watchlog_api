@@ -24,6 +24,7 @@ export const processScheduledMails = async () => {
       await sendMail({
         email: item?.email_recipient,
         message: item?.mail_text,
+        subject: item?.mail_subject
       });
 
       await client.query(

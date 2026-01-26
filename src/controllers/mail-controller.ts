@@ -20,17 +20,19 @@ const sendMailHandler = async (req: Request, res: Response) => {
 };
 
 const createScheduledMail = async (req: Request, res: Response) => {
-  const { recipient, scheduleDate, mailText } = req.body;
+  const { recipient, scheduleDate, message, subject } = req.body;  
 
   const newMailJobId = uuidv4();
   const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `INSERT INTO scheduled_mail_jobs (id, schedule_date, mail_text, email_recipient, status) 
-                  VALUES ($1, $2, $3, $4, $5)`,
-      [newMailJobId, scheduleDate, mailText, recipient, "PENDING"],
-    );
+    for (const email of recipient) {
+      await client.query(
+        `INSERT INTO scheduled_mail_jobs (id, schedule_date, mail_text, email_recipient, status, mail_subject) 
+                    VALUES ($1, $2, $3, $4, $5, $6)`,
+        [newMailJobId, scheduleDate, message, email, "PENDING", subject],
+      );
+    }
     await client.query("COMMIT");
     return res.status(201).json({ message: "Mail scheduled successfully" });
   } catch (error: any) {
