@@ -5,6 +5,14 @@ import os from "os";
 import fs from "fs";
 import { LogEntry } from "../models/log-content";
 import { parseLogContent } from "../utils/cmos-backup";
+import {
+  saveAbsoEvents,
+  getAbsoEventsFromDB,
+  getDailyAbsoStatisticsFromDB,
+  getAllControllersAbsoSummary,
+  hasAbsoData,
+  AbsoEvent as ServiceAbsoEvent,
+} from "../services/abso-event-service";
 
 interface R1Values {
   S?: number;
@@ -52,6 +60,8 @@ interface AbsoLogsResponse {
   controllerId?: string;
   controllerName?: string;
   lastModified?: string;
+  savedToDb?: boolean;
+  newEventsCount?: number;
 }
 
 const parseCurrentValue = (currValueText: string): { R1: R1Values } => {
@@ -263,6 +273,22 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
     const comparisons = compareValues(absoEvents);
     const statistics = calculateStatistics(absoEvents);
 
+    // Save to database
+    let savedToDb = false;
+    let newEventsCount = 0;
+    try {
+      const saveResult = await saveAbsoEvents({
+        controllerId,
+        events: absoEvents as ServiceAbsoEvent[],
+        fileModifiedAt: stats.mtime,
+      });
+      savedToDb = true;
+      newEventsCount = saveResult.newEventsCount;
+      //console.log(`ABSO events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+    } catch (dbError) {
+      console.error("Error saving ABSO events to DB:", dbError);
+    }
+
     const response: AbsoLogsResponse = {
       success: true,
       events: absoEvents,
@@ -271,6 +297,8 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
       controllerId,
       controllerName,
       lastModified: stats.mtime.toISOString(),
+      savedToDb,
+      newEventsCount,
     };
 
     return res.status(200).json(response);
@@ -326,6 +354,18 @@ const handleAllControllersAbso = async (req: Request, res: Response) => {
           const absoEvents = extractAbsoluteDataEvents(logEntries, controller.id, controller.name);
           allAbsoEvents = allAbsoEvents.concat(absoEvents);
           processedCount++;
+
+          // Save to database for each controller
+          try {
+            const saveResult = await saveAbsoEvents({
+              controllerId: controller.id,
+              events: absoEvents as ServiceAbsoEvent[],
+              fileModifiedAt: stats.mtime,
+            });
+            //console.log(`ABSO events saved to DB for ${controller.name}: ${saveResult.eventsCount} total, ${saveResult.newEventsCount} new`);
+          } catch (dbError) {
+            console.error(`Error saving ABSO events to DB for ${controller.name}:`, dbError);
+          }
         } catch (error) {
           console.error(`Error reading log for controller ${controller.name}:`, error);
         }
@@ -362,6 +402,110 @@ const handleAllControllersAbso = async (req: Request, res: Response) => {
       events: [],
       comparisons: [],
       statistics: null,
+    });
+  }
+};
+
+// Get ABSO events from database
+export const getAbsoEventsFromDatabase = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, limit, offset } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const result = await getAbsoEventsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined,
+    });
+
+    return res.status(200).json({
+      success: true,
+      events: result.events,
+      total: result.total,
+      limit: limit ? parseInt(limit as string, 10) : 100,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    });
+  } catch (error) {
+    console.error("Error fetching ABSO events from DB:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch ABSO events: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Get ABSO history/statistics from database
+export const getAbsoHistory = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, groupBy } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const stats = await getDailyAbsoStatisticsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      groupBy: groupBy as "day" | "week" | "month",
+    });
+
+    return res.status(200).json({
+      success: true,
+      statistics: stats,
+    });
+  } catch (error) {
+    console.error("Error fetching ABSO history:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch ABSO history: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Get all controllers ABSO summary from database
+export const getAllControllersAbsoSummaryEndpoint = async (req: Request, res: Response) => {
+  try {
+    const summary = await getAllControllersAbsoSummary();
+
+    return res.status(200).json({
+      success: true,
+      controllers: summary,
+    });
+  } catch (error) {
+    console.error("Error fetching ABSO summary:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch ABSO summary: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Check if controller has ABSO data in database
+export const checkAbsoData = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const hasData = await hasAbsoData(controllerId);
+
+    return res.status(200).json({
+      success: true,
+      hasData,
+    });
+  } catch (error) {
+    console.error("Error checking ABSO data:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to check ABSO data: ${error instanceof Error ? error.message : "Unknown error"}`,
     });
   }
 };

@@ -18,7 +18,6 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
     let queryParams: string[];
 
     if (controllerId === "all") {
-      // Get all backup sessions from all controllers
       query = `
             SELECT 
               bs.id,
@@ -203,11 +202,11 @@ const createZipBySessionId = async (req: Request, res: Response) => {
     }
 
     const tempDir = os.tmpdir();
-    // Kategori varsa farklı isimle kaydet
+
     const zipFileName = categoryName ? `${backupFolderName}_${categoryName.replace(/[^a-zA-Z0-9]/g, "_")}.zip` : `${backupFolderName}.zip`;
     const zipFilePath = path.join(tempDir, zipFileName);
 
-    // Kategori bazlı ise her zaman yeni ZIP oluştur, değilse cache kullan
+
     if (!fileFilter && fs.existsSync(zipFilePath)) {
       const existingStats = fs.statSync(zipFilePath);
       return res.status(200).json({
@@ -219,7 +218,7 @@ const createZipBySessionId = async (req: Request, res: Response) => {
       });
     }
 
-    // Filtrelenecek dosyaları belirle
+
     const filesToZip = fileFilter ? filesResult.rows.filter((f: any) => fileFilter!.includes(f.file_name)) : filesResult.rows;
 
     let filesAdded = 0;
@@ -356,18 +355,18 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
     const stats = fs.statSync(zipFilePath);
     const fileName = path.basename(zipFilePath);
 
-    // Set headers for file download
+
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Content-Length", stats.size.toString());
     res.setHeader("Cache-Control", "no-cache");
 
-    // Create read stream and pipe to response
+
     const fileStream = fs.createReadStream(zipFilePath);
     const zipPathToDelete = zipFilePath;
 
     fileStream.on("end", () => {
-      // Clean up ZIP file after download
+
       setTimeout(() => {
         try {
           if (fs.existsSync(zipPathToDelete)) {
@@ -395,7 +394,7 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
       }
     });
 
-    // Pipe the file stream to response
+
     fileStream.pipe(res);
   } catch (error) {
     console.error("Error downloading ZIP:", error);
@@ -463,7 +462,7 @@ const getLogFileContentByControllerId = async (req: Request, res: Response) => {
   }
 
   try {
-    // Handle "all" - aggregate all controllers
+
     if (controllerId === "all") {
       return await handleAllControllers();
     }
@@ -688,13 +687,296 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
   }
 };
 
+const deleteBackupSessionBySessionId = async (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+
+  if (!sessionId) {
+    return res.status(400).json({ error: "Session ID is required" });
+  }
+
+  const client = await dbPool.connect();
+
+  try {
+
+    const sessionQuery = `
+      SELECT 
+        bs.controller_ip,
+        bs.session_start_time,
+        c.name as controller_name
+      FROM backup_sessions bs
+      LEFT JOIN controller c ON bs.controller_id = c.id
+      WHERE bs.id = $1
+    `;
+    const sessionResult = await client.query(sessionQuery, [sessionId]);
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: "Backup session not found" });
+    }
+
+    const session = sessionResult.rows[0];
+    const controllerIp = session.controller_ip;
+    const sessionTime = new Date(session.session_start_time);
+
+
+    const year = sessionTime.getFullYear();
+    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
+    const day = String(sessionTime.getDate()).padStart(2, "0");
+    const hour = String(sessionTime.getHours()).padStart(2, "0");
+    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
+
+    const backupBaseDir =
+      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+
+    const possibleFolderNames = [
+      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+      `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+    ];
+
+    if (session.controller_name) {
+      possibleFolderNames.push(`${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`);
+    }
+
+    let deletedFolderPath: string | null = null;
+    for (const folderName of possibleFolderNames) {
+      const testPath = path.join(backupBaseDir, folderName);
+      if (fs.existsSync(testPath)) {
+        try {
+          fs.rmSync(testPath, { recursive: true, force: true });
+          deletedFolderPath = testPath;
+          console.log(`Deleted backup folder: ${testPath}`);
+        } catch (fsError) {
+          console.error(`Failed to delete backup folder ${testPath}:`, fsError);
+        }
+        break;
+      }
+    }
+
+
+    await client.query("BEGIN");
+
+    await client.query(`DELETE FROM backup_file_details WHERE session_id = $1`, [sessionId]);
+
+    const result = await client.query(`DELETE FROM backup_sessions WHERE id = $1 RETURNING *`, [sessionId]);
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Backup session not found" });
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Backup session deleted successfully",
+      deletedFolder: deletedFolderPath,
+      folderDeleted: deletedFolderPath !== null,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error deleting backup session:", error);
+    return res.status(500).json({ error: "Failed to delete backup session" });
+  } finally {
+    client.release();
+  }
+};
+
+// Get all backup folders from disk for a specific controller
+const getBackupFoldersForController = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ error: "Controller ID is required" });
+  }
+
+  try {
+    // Get controller info
+    const controllerQuery = `SELECT id, ip_address, name FROM controller WHERE id = $1`;
+    const controllerResult = await dbPool.query(controllerQuery, [controllerId]);
+
+    if (controllerResult.rows.length === 0) {
+      return res.status(404).json({ error: "Controller not found" });
+    }
+
+    const controller = controllerResult.rows[0];
+    const controllerIp = controller.ip_address;
+    const controllerName = controller.name;
+
+    // Get backup base directory based on OS
+    const backupBaseDir =
+      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+
+    // Check if backup directory exists
+    if (!fs.existsSync(backupBaseDir)) {
+      return res.status(200).json({
+        success: true,
+        controllerId,
+        controllerIp,
+        controllerName,
+        backupBaseDir,
+        folders: [],
+        message: "Backup directory does not exist",
+      });
+    }
+
+    // Read all folders in backup directory
+    const allFolders = fs.readdirSync(backupBaseDir);
+
+    // Filter folders that belong to this controller (by IP or name)
+    const controllerFolders = allFolders.filter((folder) => {
+      // Match patterns like: or_192.168.1.1_2024-01-15_10_30, controllerName_192.168.1.1_2024-01-15_10_30
+      return folder.includes(controllerIp) || (controllerName && folder.startsWith(controllerName + "_"));
+    });
+
+    // Get details for each folder
+    const folderDetails = controllerFolders.map((folderName) => {
+      const folderPath = path.join(backupBaseDir, folderName);
+      const stats = fs.statSync(folderPath);
+      
+      // Try to parse date from folder name
+      const dateMatch = folderName.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})_(\d{2})/);
+      let parsedDate = null;
+      if (dateMatch) {
+        const [, year, month, day, hour, minute] = dateMatch;
+        parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
+      }
+
+      // Count files in folder
+      let fileCount = 0;
+      try {
+        const files = fs.readdirSync(folderPath);
+        fileCount = files.filter((f) => fs.statSync(path.join(folderPath, f)).isFile()).length;
+      } catch (e) {
+        // Ignore errors
+      }
+
+      return {
+        name: folderName,
+        path: folderPath,
+        createdAt: stats.birthtime.toISOString(),
+        modifiedAt: stats.mtime.toISOString(),
+        parsedDate: parsedDate ? parsedDate.toISOString() : null,
+        fileCount,
+      };
+    });
+
+    // Sort by date (newest first)
+    folderDetails.sort((a, b) => {
+      const dateA = a.parsedDate || a.createdAt;
+      const dateB = b.parsedDate || b.createdAt;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+
+    return res.status(200).json({
+      success: true,
+      controllerId,
+      controllerIp,
+      controllerName,
+      backupBaseDir,
+      folders: folderDetails,
+    });
+  } catch (error) {
+    console.error("Error getting backup folders:", error);
+    return res.status(500).json({ error: "Failed to get backup folders" });
+  }
+};
+
+// Read files from a specific backup folder
+const getBackupFolderFiles = async (req: Request, res: Response) => {
+  const { folderName } = req.params;
+
+  if (!folderName) {
+    return res.status(400).json({ error: "Folder name is required" });
+  }
+
+  try {
+    const backupBaseDir =
+      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+
+    const folderPath = path.join(backupBaseDir, folderName);
+
+    if (!fs.existsSync(folderPath)) {
+      return res.status(404).json({ error: "Backup folder not found", folderPath });
+    }
+
+    const files = fs.readdirSync(folderPath);
+
+    const fileDetails = files.map((fileName) => {
+      const filePath = path.join(folderPath, fileName);
+      const stats = fs.statSync(filePath);
+      const extension = path.extname(fileName).toLowerCase();
+
+      return {
+        name: fileName,
+        type: extension.replace(".", "") || "unknown",
+        size: stats.size,
+        modified: stats.mtime.toISOString(),
+        isDirectory: stats.isDirectory(),
+      };
+    });
+
+    // Sort files by name
+    fileDetails.sort((a, b) => a.name.localeCompare(b.name));
+
+    return res.status(200).json({
+      success: true,
+      folderName,
+      folderPath,
+      totalFiles: fileDetails.length,
+      files: fileDetails,
+    });
+  } catch (error) {
+    console.error("Error reading backup folder:", error);
+    return res.status(500).json({ error: "Failed to read backup folder" });
+  }
+};
+
+// Read specific file content from backup folder
+const getBackupFileContent = async (req: Request, res: Response) => {
+  const { folderName, fileName } = req.params;
+
+  if (!folderName || !fileName) {
+    return res.status(400).json({ error: "Folder name and file name are required" });
+  }
+
+  try {
+    const backupBaseDir =
+      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+
+    const filePath = path.join(backupBaseDir, folderName, fileName);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found", filePath });
+    }
+
+    const stats = fs.statSync(filePath);
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+
+    return res.status(200).json({
+      success: true,
+      fileName,
+      folderName,
+      content: fileContent,
+      fileSize: stats.size,
+      lastModified: stats.mtime.toISOString(),
+    });
+  } catch (error) {
+    console.error("Error reading file:", error);
+    return res.status(500).json({ error: "Failed to read file" });
+  }
+};
+
 export {
   getBackupHistoryByControllerId,
   getBackupSessionBySessionId,
+  deleteBackupSessionBySessionId,
   createZipBySessionId,
   downloadZipBySessionId,
   getFileSaveHistory,
   getLogFileContentByControllerId,
   getReadFileBySessionIdWithFileName,
   getSessionFolderFilesBySessionId,
+  getBackupFoldersForController,
+  getBackupFolderFiles,
+  getBackupFileContent,
 };

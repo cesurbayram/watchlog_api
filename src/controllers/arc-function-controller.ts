@@ -34,6 +34,7 @@ const getArcFunctions = async (req: Request, res: Response) => {
         af.updated_at as "updatedAt",
         af.job_names as "jobNames",
         af.part_item_numbers as "partItemNumbers",
+        af.slave_number as "slaveNumber",
         c.name as "controllerName",
         af.factory as "factoryName",
         af.line as "lineName",
@@ -92,6 +93,7 @@ const getArcFunctionById = async (req: Request, res: Response) => {
         af.updated_at as "updatedAt",
         af.job_names as "jobNames",
         af.part_item_numbers as "partItemNumbers",
+        af.slave_number as "slaveNumber",
         c.name as "controllerName",
         c.ip_address as "controllerIpAddress",
         af.factory as "factoryName",
@@ -128,6 +130,7 @@ const createArcFunction = async (req: Request, res: Response) => {
       jobNames = [],
       partItemNumbers = [],
       partSerialId = null,
+      slaveNumber = 0,
     } = req.body;
 
     if (!controllerId) {
@@ -156,8 +159,23 @@ const createArcFunction = async (req: Request, res: Response) => {
       "job_names",
       "part_item_numbers",
       "part_serial_id",
+      "slave_number",
     ];
-    const values = [id, controllerId, ipAddress, factory, line, cell, machineName, machineType, isActive, jobNames, partItemNumbers, partSerialId];
+    const values: any[] = [
+      id,
+      controllerId,
+      ipAddress,
+      factory,
+      line,
+      cell,
+      machineName,
+      machineType,
+      isActive,
+      jobNames,
+      partItemNumbers,
+      partSerialId,
+      slaveNumber,
+    ];
 
     if (registers.setVoltage !== undefined) {
       columns.push("set_voltage");
@@ -222,7 +240,8 @@ const createArcFunction = async (req: Request, res: Response) => {
         created_at as "createdAt",
         updated_at as "updatedAt",
         job_names as "jobNames",
-        part_item_numbers as "partItemNumbers"
+        part_item_numbers as "partItemNumbers",
+        slave_number as "slaveNumber"
     `;
 
     const result = await dbPool.query(query, values);
@@ -237,7 +256,20 @@ const createArcFunction = async (req: Request, res: Response) => {
 const updateArcFunction = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { machineName, machineType, controllerId, ipAddress, factory, line, cell, isActive, jobNames, partItemNumbers, partSerialId } = req.body;
+    const {
+      machineName,
+      machineType,
+      controllerId,
+      ipAddress,
+      factory,
+      line,
+      cell,
+      isActive,
+      jobNames,
+      partItemNumbers,
+      partSerialId,
+      slaveNumber,
+    } = req.body;
 
     // Check if record exists
     const checkResult = await dbPool.query("SELECT id FROM arc_function WHERE id = $1", [id]);
@@ -296,6 +328,10 @@ const updateArcFunction = async (req: Request, res: Response) => {
     if (partSerialId !== undefined) {
       updates.push(`part_serial_id = $${paramIndex++}`);
       values.push(partSerialId);
+    }
+    if (slaveNumber !== undefined) {
+      updates.push(`slave_number = $${paramIndex++}`);
+      values.push(slaveNumber);
     }
 
     if (machineName !== undefined) {
@@ -357,7 +393,8 @@ const updateArcFunction = async (req: Request, res: Response) => {
         created_at as "createdAt",
         updated_at as "updatedAt",
         job_names as "jobNames",
-        part_item_numbers as "partItemNumbers"
+        part_item_numbers as "partItemNumbers",
+        slave_number as "slaveNumber"
     `;
 
     const result = await dbPool.query(query, values);

@@ -5,6 +5,14 @@ import os from "os";
 import fs from "fs";
 import { LogEntry } from "../models/log-content";
 import { parseLogContent } from "../utils/cmos-backup";
+import {
+  saveTCPEvents,
+  getTCPEventsFromDB,
+  getDailyTCPStatisticsFromDB,
+  getAllControllersTCPSummary,
+  hasTCPData,
+  TCPEvent as ServiceTCPEvent,
+} from "../services/tcp-event-service";
 
 // Types
 interface ParsedElement {
@@ -57,6 +65,8 @@ interface TCPLogsResponse {
   controllerId?: string;
   controllerName?: string;
   lastModified?: string;
+  savedToDb?: boolean;
+  newEventsCount?: number;
 }
 
 // Parse element number to get tool and parameter info
@@ -265,6 +275,22 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
     const comparisons = compareValues(tcpEvents);
     const statistics = calculateStatistics(tcpEvents);
 
+    // Save to database
+    let savedToDb = false;
+    let newEventsCount = 0;
+    try {
+      const saveResult = await saveTCPEvents({
+        controllerId,
+        events: tcpEvents as ServiceTCPEvent[],
+        fileModifiedAt: stats.mtime,
+      });
+      savedToDb = true;
+      newEventsCount = saveResult.newEventsCount;
+      //console.log(`TCP events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+    } catch (dbError) {
+      console.error("Error saving TCP events to DB:", dbError);
+    }
+
     const response: TCPLogsResponse = {
       success: true,
       events: tcpEvents,
@@ -273,6 +299,8 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
       controllerId,
       controllerName,
       lastModified: stats.mtime.toISOString(),
+      savedToDb,
+      newEventsCount,
     };
 
     return res.status(200).json(response);
@@ -328,6 +356,18 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
           const tcpEvents = extractTCPDataEvents(logEntries, controller.id, controller.name);
           allTCPEvents = allTCPEvents.concat(tcpEvents);
           processedCount++;
+
+          // Save to database for each controller
+          try {
+            const saveResult = await saveTCPEvents({
+              controllerId: controller.id,
+              events: tcpEvents as ServiceTCPEvent[],
+              fileModifiedAt: stats.mtime,
+            });
+            //console.log(`TCP events saved to DB for ${controller.name}: ${saveResult.eventsCount} total, ${saveResult.newEventsCount} new`);
+          } catch (dbError) {
+            console.error(`Error saving TCP events to DB for ${controller.name}:`, dbError);
+          }
         } catch (error) {
           console.error(`Error reading log for controller ${controller.name}:`, error);
         }
@@ -364,6 +404,111 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
       events: [],
       comparisons: [],
       statistics: null,
+    });
+  }
+};
+
+// Get TCP events from database
+export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, toolNumber, limit, offset } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const result = await getTCPEventsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      toolNumber: toolNumber ? parseInt(toolNumber as string, 10) : undefined,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined,
+    });
+
+    return res.status(200).json({
+      success: true,
+      events: result.events,
+      total: result.total,
+      limit: limit ? parseInt(limit as string, 10) : 100,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    });
+  } catch (error) {
+    console.error("Error fetching TCP events from DB:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch TCP events: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Get TCP history/statistics from database
+export const getTcpHistory = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, groupBy } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const stats = await getDailyTCPStatisticsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      groupBy: groupBy as "day" | "week" | "month",
+    });
+
+    return res.status(200).json({
+      success: true,
+      statistics: stats,
+    });
+  } catch (error) {
+    console.error("Error fetching TCP history:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch TCP history: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Get all controllers TCP summary from database
+export const getAllControllersTcpSummaryEndpoint = async (req: Request, res: Response) => {
+  try {
+    const summary = await getAllControllersTCPSummary();
+
+    return res.status(200).json({
+      success: true,
+      controllers: summary,
+    });
+  } catch (error) {
+    console.error("Error fetching TCP summary:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch TCP summary: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// Check if controller has TCP data in database
+export const checkTcpData = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const hasData = await hasTCPData(controllerId);
+
+    return res.status(200).json({
+      success: true,
+      hasData,
+    });
+  } catch (error) {
+    console.error("Error checking TCP data:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to check TCP data: ${error instanceof Error ? error.message : "Unknown error"}`,
     });
   }
 };
