@@ -5,6 +5,15 @@ import os from "os";
 import fs from "fs";
 import { LogEntry } from "../models/log-content";
 import { parseLogContent } from "../utils/cmos-backup";
+import {
+  saveTeachingEvents,
+  getTeachingEventsFromDB,
+  getDailyStatisticsFromDB,
+  getAllControllersSummary,
+  getUniqueFileNames,
+  hasTeachingData,
+  TeachingEvent as ServiceTeachingEvent,
+} from "../services/teaching-event-service";
 
 // Types
 interface TeachingEvent {
@@ -44,6 +53,8 @@ interface TeachingLogsResponse {
   controllerId?: string;
   controllerName?: string;
   lastModified?: string;
+  savedToDb?: boolean;
+  newEventsCount?: number;
 }
 
 // Extract teaching events from log entries
@@ -158,7 +169,7 @@ const calculateStatistics = (events: TeachingEvent[]): TeachingStatistics => {
   };
 };
 
-// Get teaching logs for a single controller
+// Get teaching logs for a single controller (file-based, saves to DB)
 export const getTeachingLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -206,6 +217,22 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
     const teachingEvents = extractTeachingEvents(logEntries, controllerId, controllerName);
     const statistics = calculateStatistics(teachingEvents);
 
+    // Save to database
+    let savedToDb = false;
+    let newEventsCount = 0;
+    try {
+      const saveResult = await saveTeachingEvents({
+        controllerId,
+        events: teachingEvents as ServiceTeachingEvent[],
+        fileModifiedAt: stats.mtime,
+      });
+      savedToDb = true;
+      newEventsCount = saveResult.newEventsCount;
+      console.log(`Teaching events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+    } catch (dbError) {
+      console.error("Error saving teaching events to DB:", dbError);
+    }
+
     const response: TeachingLogsResponse = {
       success: true,
       events: teachingEvents,
@@ -213,6 +240,8 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
       controllerId,
       controllerName,
       lastModified: stats.mtime.toISOString(),
+      savedToDb,
+      newEventsCount,
     };
 
     return res.status(200).json(response);
@@ -247,7 +276,7 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
     const fileName = "LOGDATA.DAT";
     let allTeachingEvents: TeachingEvent[] = [];
     let lastModifiedDate: Date | null = null;
-    let processedCount = 0;
+    let totalNewEvents = 0;
 
     for (const controller of controllersResult.rows) {
       const folderName = `${controller.ip_address}_LOGDATA`;
@@ -265,7 +294,18 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
           const logEntries = parseLogContent(fileContent);
           const teachingEvents = extractTeachingEvents(logEntries, controller.id, controller.name);
           allTeachingEvents = allTeachingEvents.concat(teachingEvents);
-          processedCount++;
+
+          // Save to database for each controller
+          try {
+            const saveResult = await saveTeachingEvents({
+              controllerId: controller.id,
+              events: teachingEvents as ServiceTeachingEvent[],
+              fileModifiedAt: stats.mtime,
+            });
+            totalNewEvents += saveResult.newEventsCount;
+          } catch (dbError) {
+            console.error(`Error saving teaching events for ${controller.name}:`, dbError);
+          }
         } catch (error) {
           console.error(`Error reading log for controller ${controller.name}:`, error);
         }
@@ -282,6 +322,8 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
       events: allTeachingEvents,
       statistics,
       lastModified: lastModifiedDate?.toISOString() || new Date().toISOString(),
+      savedToDb: true,
+      newEventsCount: totalNewEvents,
     };
 
     return res.status(200).json(response);
@@ -292,6 +334,157 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
       error: `Failed to aggregate teaching logs: ${error instanceof Error ? error.message : "Unknown error"}`,
       events: [],
       statistics: null,
+    });
+  }
+};
+
+// NEW: Get teaching events from database (with filters)
+export const getTeachingEventsFromDatabase = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, eventType, fileName, limit, offset } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    // Check if controllerId is "all"
+    if (controllerId === "all") {
+      return await getAllControllersSummaryEndpoint(req, res);
+    }
+
+    const result = await getTeachingEventsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      eventType: eventType as string,
+      fileName: fileName as string,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined,
+    });
+
+    // Transform DB events to API format
+    const events = result.events.map((e) => ({
+      index: e.event_index,
+      date: e.event_date ? e.event_date.toISOString() : "",
+      type: e.event_type,
+      fileName: e.file_name,
+      lineNumber: e.line_number,
+      details: e.details,
+      rawEntry: e.raw_entry,
+      controllerId: e.controller_id,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      events,
+      total: result.total,
+      limit: limit ? parseInt(limit as string, 10) : 100,
+      offset: offset ? parseInt(offset as string, 10) : 0,
+    });
+  } catch (error) {
+    console.error("Error getting teaching events from DB:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to get teaching events: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// NEW: Get teaching statistics history
+export const getTeachingHistory = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, groupBy } = req.query;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const stats = await getDailyStatisticsFromDB(controllerId, {
+      startDate: startDate as string,
+      endDate: endDate as string,
+      groupBy: (groupBy as "day" | "week" | "month") || "day",
+    });
+
+    return res.status(200).json({
+      success: true,
+      statistics: stats,
+      controllerId,
+      groupBy: groupBy || "day",
+    });
+  } catch (error) {
+    console.error("Error getting teaching history:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to get teaching history: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// NEW: Get all controllers summary
+export const getAllControllersSummaryEndpoint = async (req: Request, res: Response) => {
+  try {
+    const summary = await getAllControllersSummary();
+
+    return res.status(200).json({
+      success: true,
+      controllers: summary,
+      total: summary.length,
+    });
+  } catch (error) {
+    console.error("Error getting controllers summary:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to get controllers summary: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// NEW: Get unique file names for filtering
+export const getTeachingFileNames = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const fileNames = await getUniqueFileNames(controllerId);
+
+    return res.status(200).json({
+      success: true,
+      fileNames,
+    });
+  } catch (error) {
+    console.error("Error getting file names:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to get file names: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+// NEW: Check if controller has teaching data
+export const checkTeachingData = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  try {
+    const hasData = await hasTeachingData(controllerId);
+
+    return res.status(200).json({
+      success: true,
+      hasData,
+      controllerId,
+    });
+  } catch (error) {
+    console.error("Error checking teaching data:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to check teaching data: ${error instanceof Error ? error.message : "Unknown error"}`,
     });
   }
 };

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { parse } from "csv-parse/sync";
+import Database from "better-sqlite3";
 import os from "os";
 
 export interface WeldRawData {
@@ -35,11 +35,51 @@ export interface WeldRawData {
   ipAddress: string;
   toolNo: number | null;
   dataPart: number | null;
+  groupType: string | null;
 }
 
+interface WeldHeaderRow {
+  DataPart: string;
+  Factory: string;
+  Line: string;
+  Cell: string;
+  PartSerialID: string;
+  PartItemNumber: string;
+  PartVersion: string;
+  SeamNumber: number;
+  ToolNo: number | null;
+  WeldLength: number;
+  SetVoltage: number | null;
+  SetCurrent: number | null;
+  AvarageVoltage: number | null;
+  AvarageCurrent: number | null;
+  AvarageGasFlow: number | null;
+  GasConsumption: number | null;
+  WeldDuration: number | null;
+  WeldingSpeed: number | null;
+  WireConsumption: number | null;
+  MachineName: string;
+  IpAdress: string;
+  JobName: string;
+  GroupType: string | null;
+}
+
+interface WeldDetailRow {
+  Id: number;
+  DataPart: string;
+  DateTime: string;
+  ActualVoltage: number | null;
+  ActualCurrent: number | null;
+  WireSpeed: number | null;
+  MotorTorqueM1: number | null;
+  MotorTorqueM2: number | null;
+  ActualGasFlow: number | null;
+}
+
+interface JoinedWeldRow extends WeldHeaderRow, Omit<WeldDetailRow, "DataPart"> {}
+
 export function getWeldDirectory(ipAddress: string): string {
-  const baseDir =
-    process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Weld" : path.join(os.homedir(), "Watchlog", "Weld"));
+  const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Weld" : path.join(os.homedir(), "Watchlog", "Weld"));
 
   return path.join(baseDir, `${ipAddress}_Weld`);
 }
@@ -64,18 +104,19 @@ export function listHourlyFiles(dateFolderPath: string): string[] {
   }
 
   const files = fs.readdirSync(dateFolderPath);
-  const csvFiles = files.filter((file) => file.endsWith("_Weld.csv") || file.endsWith("_weld.csv"));
 
-  return csvFiles.sort();
+  const dbFiles = files.filter((file) => file.endsWith("_Weld.db") || file.endsWith("_weld.db"));
+
+  return dbFiles.sort();
 }
 
 export function readDateFolderData(dateFolderPath: string): WeldRawData[] {
   const hourlyFiles = listHourlyFiles(dateFolderPath);
   const allData: WeldRawData[] = [];
 
-  for (const csvFile of hourlyFiles) {
-    const filePath = path.join(dateFolderPath, csvFile);
-    const data = readWeldCSV(filePath);
+  for (const dbFile of hourlyFiles) {
+    const filePath = path.join(dateFolderPath, dbFile);
+    const data = readWeldSQLite(filePath);
     allData.push(...data);
   }
 
@@ -88,6 +129,7 @@ export function readAllWeldData(weldDir: string): WeldRawData[] {
   }
 
   const allData: WeldRawData[] = [];
+
   const dateFolders = listDateFolders(weldDir);
 
   if (dateFolders.length > 0) {
@@ -98,11 +140,11 @@ export function readAllWeldData(weldDir: string): WeldRawData[] {
     }
   } else {
     const files = fs.readdirSync(weldDir);
-    const csvFiles = files.filter((file) => file.endsWith("_Weld.csv") || file.endsWith("_weld.csv"));
+    const dbFiles = files.filter((file) => file.endsWith("_Weld.db") || file.endsWith("_weld.db"));
 
-    for (const csvFile of csvFiles) {
-      const filePath = path.join(weldDir, csvFile);
-      const data = readWeldCSV(filePath);
+    for (const dbFile of dbFiles) {
+      const filePath = path.join(weldDir, dbFile);
+      const data = readWeldSQLite(filePath);
       allData.push(...data);
     }
   }
@@ -110,113 +152,111 @@ export function readAllWeldData(weldDir: string): WeldRawData[] {
   return allData;
 }
 
-export function readWeldCSV(filePath: string): WeldRawData[] {
+export function readWeldSQLite(filePath: string): WeldRawData[] {
   try {
     if (!fs.existsSync(filePath)) {
       return [];
     }
 
-    let csvContent = fs.readFileSync(filePath, "utf-8");
+    const db = new Database(filePath, { readonly: true });
 
-    if (csvContent.charCodeAt(0) === 0xfeff) {
-      csvContent = csvContent.slice(1);
-    }
+    const query = `
+      SELECT 
+        h.DataPart,
+        h.Factory,
+        h.Line,
+        h.Cell,
+        h.PartSerialID,
+        h.PartItemNumber,
+        h.PartVersion,
+        h.SeamNumber,
+        h.ToolNo,
+        h.WeldLength,
+        h.SetVoltage,
+        h.SetCurrent,
+        h.AvarageVoltage,
+        h.AvarageCurrent,
+        h.AvarageGasFlow,
+        h.GasConsumption,
+        h.WeldDuration,
+        h.WeldingSpeed,
+        h.WireConsumption,
+        h.MachineName,
+        h.IpAdress,
+        h.JobName,
+        h.GroupType,
+        d.Id,
+        d.DateTime,
+        d.ActualVoltage,
+        d.ActualCurrent,
+        d.WireSpeed,
+        d.MotorTorqueM1,
+        d.MotorTorqueM2,
+        d.ActualGasFlow
+      FROM WeldHeaders h
+      INNER JOIN WeldDetails d ON h.DataPart = d.DataPart
+      ORDER BY d.DateTime
+    `;
 
-    const lines = csvContent.split(/\r?\n/);
+    const rows = db.prepare(query).all() as JoinedWeldRow[];
+    db.close();
 
-    let startIndex = 0;
-    if (lines[0].startsWith("sep=")) {
-      startIndex = 1;
-    }
-
-    const headerLine = lines[startIndex];
-    let delimiter = ",";
-
-    if (headerLine) {
-      const semicolonCount = (headerLine.match(/;/g) || []).length;
-      const commaCount = (headerLine.match(/,/g) || []).length;
-
-      if (semicolonCount > commaCount) {
-        delimiter = ";";
-      }
-    }
-
-    if (lines[0].startsWith("sep=")) {
-      delimiter = lines[0].charAt(4);
-      csvContent = lines.slice(1).join("\n");
-    }
-
-    const records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      delimiter: delimiter,
-      relax_column_count: true,
-      bom: true,
-    });
-
-    return records.map((record: any) => mapCsvToWeldData(record));
+    return rows.map((row) => mapSqliteToWeldData(row));
   } catch (error) {
-    console.error(`Error reading CSV file ${filePath}:`, error);
+    console.error(`Error reading SQLite file ${filePath}:`, error);
     return [];
   }
 }
 
-function getColumnValue(record: any, columnName: string): string {
-  if (record[columnName] !== undefined) {
-    return record[columnName];
-  }
+function mapSqliteToWeldData(row: JoinedWeldRow): WeldRawData {
+  let date = "";
+  let time = "";
 
-  const keys = Object.keys(record);
-  for (const key of keys) {
-    if (key.trim().toUpperCase() === columnName.toUpperCase()) {
-      return record[key];
+  if (row.DateTime) {
+    const parts = row.DateTime.split(" ");
+    date = parts[0] || "";
+    time = parts[1] || "";
+
+    if (time.includes(".")) {
+      const timeParts = time.split(".");
+      const hms = timeParts[0];
+      const ms = timeParts[1] || "0";
+      time = `${hms}:${ms.padEnd(3, "0").substring(0, 3)}`;
     }
   }
 
-  return "";
-}
-
-export function mapCsvToWeldData(record: any): WeldRawData {
-  const parseNumber = (value: any): number | null => {
-    if (value === undefined || value === null || value === "") return null;
-    const num = parseFloat(String(value).replace(",", "."));
-    return isNaN(num) ? null : num;
-  };
-
-  const getValue = (col: string) => getColumnValue(record, col);
-
   return {
-    date: getValue("DATE"),
-    time: getValue("TIME"),
-    factory: getValue("FACTORY"),
-    line: getValue("LINE"),
-    cell: getValue("CELL"),
-    partSerialId: String(getValue("PART SERIAL ID") || ""),
-    partItemNumber: getValue("PART ITEM NUMBER"),
-    partVersion: getValue("PART VERSION"),
-    jobName: getValue("JOB NAME"),
-    seamNumber: parseInt(getValue("SEAM NUMBER")) || 0,
-    weldLength: parseNumber(getValue("WELD LENGHT (mm)")) || 0,
-    setVoltage: parseNumber(getValue("SET VOLTAGE (V)")),
-    setCurrent: parseNumber(getValue("SET CURRENT (A)")),
-    averageVoltage: parseNumber(getValue("AVARAGE VOLTAGE (V)")),
-    averageCurrent: parseNumber(getValue("AVARAGE CURRENT (A)")),
-    actualVoltage: parseNumber(getValue("ACTUAL VOLTAGE (V)")),
-    actualCurrent: parseNumber(getValue("ACTUAL CURRENT (A)")),
-    wireSpeed: parseNumber(getValue("WIRE SPEED (mm/s)")),
-    torqueM1: parseNumber(getValue("TORQUE M1 (N)")),
-    torqueM2: parseNumber(getValue("TORQUE M2 (N)")),
-    averageGasFlow: parseNumber(getValue("AVARAGE GAS FLOW")),
-    actualGasFlow: parseNumber(getValue("ACTUAL GAS FLOW")),
-    gasConsumption: parseNumber(getValue("GAS CONSUMPTION")),
-    weldDuration: parseNumber(getValue("WELD DURATION (s)")),
-    weldingSpeed: parseNumber(getValue("WELDING SPEED (mm/s)")),
-    wireConsumption: parseNumber(getValue("WIRE CONSUMPTION (mm)")),
-    machine: getValue("MACHINE"),
-    processTime: getValue("PROCESS TIME") || null,
-    ipAddress: getValue("IP ADRESS") || getValue("IP ADDRESS"),
-    toolNo: parseNumber(getValue("TOOL NO")),
-    dataPart: parseNumber(getValue("DATA PART")),
+    date,
+    time,
+    factory: row.Factory || "",
+    line: row.Line || "",
+    cell: row.Cell || "",
+    partSerialId: row.PartSerialID || "",
+    partItemNumber: row.PartItemNumber || "",
+    partVersion: row.PartVersion || "",
+    jobName: row.JobName || "",
+    seamNumber: row.SeamNumber || 0,
+    weldLength: row.WeldLength || 0,
+    setVoltage: row.SetVoltage,
+    setCurrent: row.SetCurrent,
+    averageVoltage: row.AvarageVoltage,
+    averageCurrent: row.AvarageCurrent,
+    actualVoltage: row.ActualVoltage,
+    actualCurrent: row.ActualCurrent,
+    wireSpeed: row.WireSpeed,
+    torqueM1: row.MotorTorqueM1,
+    torqueM2: row.MotorTorqueM2,
+    averageGasFlow: row.AvarageGasFlow,
+    actualGasFlow: row.ActualGasFlow,
+    gasConsumption: row.GasConsumption,
+    weldDuration: row.WeldDuration,
+    weldingSpeed: row.WeldingSpeed,
+    wireConsumption: row.WireConsumption,
+    machine: row.MachineName || "",
+    processTime: null,
+    ipAddress: row.IpAdress || "",
+    toolNo: row.ToolNo,
+    dataPart: row.DataPart ? parseInt(row.DataPart) || null : null,
+    groupType: row.GroupType || null,
   };
 }

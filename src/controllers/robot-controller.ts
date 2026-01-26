@@ -555,6 +555,107 @@ const getAbsoDataWithControllerId = async (req: Request, res: Response) => {
   }
 };
 
+const getBackupFiles = async (req: Request, res: Response) => {
+  try {
+    const { controllerId } = req.params;
+    const { date } = req.query;
+
+    let query = `
+      SELECT 
+        id, controller_id, plan_id, file_name, file_type,
+        size, hash, path, backup_date, status, error_message, created_at
+      FROM backup_files 
+      WHERE controller_id = $1
+    `;
+
+    const queryParams: (string | undefined)[] = [controllerId];
+    if (date) {
+      query += ` AND DATE(backup_date) = DATE($2)`;
+      queryParams.push(date as string);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+
+    const result = await dbPool.query(query, queryParams);
+    return res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("Error fetching backup files:", error);
+    return res.status(500).json({ error: "Failed to fetch backup files" });
+  }
+};
+
+const deleteBackupFile = async (req: Request, res: Response) => {
+  try {
+    const { controllerId } = req.params;
+    const { fileId } = req.query;
+
+    if (!fileId) {
+      return res.status(400).json({ error: "File ID is required" });
+    }
+
+    const query = `
+      DELETE FROM backup_files
+      WHERE controller_id = $1 AND id = $2
+      RETURNING *
+    `;
+
+    const result = await dbPool.query(query, [controllerId, fileId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    return res.status(200).json({ message: "File deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting backup file:", error);
+    return res.status(500).json({ error: "Failed to delete backup file" });
+  }
+};
+
+const createAlarm = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { code, text, alarm_type = "MAJOR", is_active = true } = req.body;
+
+  if (!code || !text) {
+    return res.status(400).json({ message: "Code and text are required" });
+  }
+
+  const client = await dbPool.connect();
+
+  try {
+    const alarmId = uuidv4();
+    const originDate = new Date().toISOString();
+
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO alarm (id, controller_id, code, text, detected, origin_date, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [alarmId, controllerId, code, text, originDate, originDate, is_active],
+    );
+
+    await client.query(
+      `INSERT INTO almhist (id, controller_id, code, name, origin_date, mode, type)
+       VALUES ($1, $2, $3, $4, $5, 'DETECTED', $6)`,
+      [uuidv4(), controllerId, code, text, originDate, alarm_type],
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      message: "Alarm triggered successfully",
+      alarm_id: alarmId,
+      controller_id: controllerId,
+    });
+  } catch (error: any) {
+    await client.query("ROLLBACK");
+    console.error("DB ERROR:", error.message);
+    return res.status(500).json({ message: "Internal Server Error" });
+  } finally {
+    client.release();
+  }
+};
+
 export {
   getRobots,
   createRobot,
@@ -565,4 +666,7 @@ export {
   getStatus,
   getAlarmsWithTypeByControllerId,
   getAbsoDataWithControllerId,
+  getBackupFiles,
+  deleteBackupFile,
+  createAlarm,
 };

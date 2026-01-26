@@ -9,6 +9,9 @@ import {
   getStatus,
   getStatusHistory,
   updateRobot,
+  getBackupFiles,
+  deleteBackupFile,
+  createAlarm,
 } from "../controllers/robot-controller";
 import { getUtilizationByControllerId } from "../controllers/utilzation-controller";
 import { saveComparison, getComparisonHistory, getComparisonById, deleteComparison } from "../controllers/teaching-controller";
@@ -27,8 +30,11 @@ robotRouter.get("/status", getStatus);
 robotRouter.get("/:id", getRobotById);
 robotRouter.put("/:id", updateRobot);
 robotRouter.delete("/:id", deleteRobot);
+robotRouter.post("/:controllerId/alarms", createAlarm);
 robotRouter.get("/:controllerId/alarms/:types", getAlarmsWithTypeByControllerId);
 robotRouter.get("/:controllerId/data/absodat", getAbsoDataWithControllerId);
+robotRouter.get("/:controllerId/files", getBackupFiles);
+robotRouter.delete("/:controllerId/files", deleteBackupFile);
 robotRouter.get("/:controllerId/utilization", getUtilizationByControllerId);
 
 robotRouter.post("/:controllerId/teaching/compare", saveComparison);
