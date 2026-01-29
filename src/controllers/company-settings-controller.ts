@@ -2,11 +2,19 @@ import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import { v4 as uuidv4 } from "uuid";
 
-const createUpdateCompanySettings = async (req: Request, res: Response) => {
-    const {companyName, mailHost, mailPort, mailUser, mailPass} = req.body
+const getCompanySettings = async (req: Request, res: Response) => {
+    try {
+        const companySettingsDbRes = await dbPool.query(`SELECT * FROM company`);
+        const companySettingsData = companySettingsDbRes.rows[0]
+        return res.status(200).json(companySettingsData)
+    } catch (error) {
+        console.error("DB ERROR:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
 
-    console.log('req.body', req.body);
-    
+const createUpdateCompanySettings = async (req: Request, res: Response) => {
+    const {companyName, mailHost, mailPort, mailUser, mailPass} = req.body    
 
     const client = await dbPool.connect();
 
@@ -46,4 +54,4 @@ const createUpdateCompanySettings = async (req: Request, res: Response) => {
     }
 }
 
-export { createUpdateCompanySettings }
+export { createUpdateCompanySettings, getCompanySettings }
