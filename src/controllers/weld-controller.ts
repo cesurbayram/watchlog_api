@@ -2,87 +2,9 @@ import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import fs from "fs";
 import path from "path";
-import { getWeldDirectory, listDateFolders, listHourlyFiles, readWeldSQLite, readAllWeldData, WeldRawData } from "../utils/weld-parser";
+import { getWeldDirectory, listDateFolders, listHourlyFiles, readWeldSQLite, readAllWeldData } from "../utils/weld-parser";
+import { WeldRawData, WeldPartSummary, WeldSeamSummary, FlatSeamRow, WeldSeamDetail, WeldActualData, WeldFileInfo } from "../models/weld-dto";
 
-interface WeldFileInfo {
-  fileName: string;
-  date: string;
-  recordCount: number;
-}
-
-interface WeldSeamSummary {
-  seamNumber: number;
-  weldDuration: number | null;
-  weldLength: number;
-  startTime: string;
-  dataPart: number | null;
-  toolNo: number | null;
-  groupType: string | null;
-}
-
-interface WeldPartSummary {
-  factory: string;
-  line: string;
-  cell: string;
-  partSerialId: string;
-  partItemNumber: string;
-  partVersion: string;
-  jobName: string;
-  machine: string;
-  date: string;
-  seamCount: number;
-  totalRecords: number;
-  seams: WeldSeamSummary[];
-}
-
-interface FlatSeamRow {
-  factory: string;
-  line: string;
-  cell: string;
-  partSerialId: string;
-  partItemNumber: string;
-  partVersion: string;
-  jobName: string;
-  machine: string;
-  date: string;
-  seamNumber: number;
-  startTime: string;
-  weldDuration: number | null;
-  weldLength: number;
-  dataPart: number | null;
-  toolNo: number | null;
-  groupType: string | null;
-}
-
-interface WeldSeamDetail {
-  seamNumber: number;
-  operationIndex: number;
-  startTime: string;
-  weldLength: number;
-  weldDuration: number | null;
-  weldingSpeed: number | null;
-  wireConsumption: number | null;
-  setVoltage: number | null;
-  setCurrent: number | null;
-  averageVoltage: number | null;
-  averageCurrent: number | null;
-  averageGasFlow: number | null;
-  gasConsumption: number | null;
-  recordCount: number;
-  dataPart: number | null;
-  toolNo: number | null;
-}
-
-interface WeldActualData {
-  date: string;
-  time: string;
-  actualVoltage: number | null;
-  actualCurrent: number | null;
-  wireSpeed: number | null;
-  torqueM1: number | null;
-  torqueM2: number | null;
-  actualGasFlow: number | null;
-}
 
 function parseTimeToMs(time: string): number {
   const parts = time.split(":");

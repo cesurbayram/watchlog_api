@@ -12,52 +12,10 @@ import {
   getAllControllersSummary,
   getUniqueFileNames,
   hasTeachingData,
-  TeachingEvent as ServiceTeachingEvent,
 } from "../services/teaching-event-service";
+import { TeachingEvent as ServiceTeachingEvent } from "../models/teaching-event-dto";
+import { TeachingEvent, TeachingStatistics, TeachingLogsResponse } from "../models/teaching-event-dto";
 
-// Types
-interface TeachingEvent {
-  index: number;
-  date: string;
-  type: "POINT_MODIFICATION" | "INSTRUCTION_INSERT" | "INSTRUCTION_DELETE" | "TEACH_MODE";
-  fileName?: string;
-  lineNumber?: string;
-  details: string;
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-interface FileModification {
-  fileName: string;
-  count: number;
-  lastTeachingDate: string;
-  lastEvent: TeachingEvent;
-}
-
-interface TeachingStatistics {
-  totalTeachingEvents: number;
-  pointModifications: number;
-  instructionInserts: number;
-  instructionDeletes: number;
-  teachModeActivations: number;
-  lastTeachingDate?: string;
-  mostModifiedFiles: FileModification[];
-}
-
-interface TeachingLogsResponse {
-  success: boolean;
-  events: TeachingEvent[];
-  statistics: TeachingStatistics | null;
-  error?: string;
-  controllerId?: string;
-  controllerName?: string;
-  lastModified?: string;
-  savedToDb?: boolean;
-  newEventsCount?: number;
-}
-
-// Extract teaching events from log entries
 const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: string, controllerName?: string): TeachingEvent[] => {
   const events: TeachingEvent[] = [];
 
@@ -116,7 +74,6 @@ const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: string, co
   return events.sort((a, b) => a.index - b.index);
 };
 
-// Calculate statistics from teaching events
 const calculateStatistics = (events: TeachingEvent[]): TeachingStatistics => {
   const fileModifications: {
     [key: string]: {
@@ -169,7 +126,7 @@ const calculateStatistics = (events: TeachingEvent[]): TeachingStatistics => {
   };
 };
 
-// Get teaching logs for a single controller (file-based, saves to DB)
+
 export const getTeachingLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -178,7 +135,7 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
   }
 
   try {
-    // Handle "all" - aggregate all controllers
+
     if (controllerId === "all") {
       return await handleAllControllersTeaching(req, res);
     }
@@ -217,7 +174,6 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
     const teachingEvents = extractTeachingEvents(logEntries, controllerId, controllerName);
     const statistics = calculateStatistics(teachingEvents);
 
-    // Save to database
     let savedToDb = false;
     let newEventsCount = 0;
     try {
@@ -228,7 +184,7 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
       });
       savedToDb = true;
       newEventsCount = saveResult.newEventsCount;
-      //console.log(`Teaching events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+
     } catch (dbError) {
       console.error("Error saving teaching events to DB:", dbError);
     }
@@ -256,7 +212,7 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
   }
 };
 
-// Handle all controllers aggregation
+
 const handleAllControllersTeaching = async (req: Request, res: Response) => {
   try {
     const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
@@ -295,7 +251,7 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
           const teachingEvents = extractTeachingEvents(logEntries, controller.id, controller.name);
           allTeachingEvents = allTeachingEvents.concat(teachingEvents);
 
-          // Save to database for each controller
+
           try {
             const saveResult = await saveTeachingEvents({
               controllerId: controller.id,
@@ -312,7 +268,6 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
       }
     }
 
-    // Sort by index
     allTeachingEvents.sort((a, b) => a.index - b.index);
 
     const statistics = calculateStatistics(allTeachingEvents);
@@ -338,7 +293,7 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
   }
 };
 
-// NEW: Get teaching events from database (with filters)
+
 export const getTeachingEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, eventType, fileName, limit, offset } = req.query;
@@ -348,7 +303,7 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
   }
 
   try {
-    // Check if controllerId is "all"
+
     if (controllerId === "all") {
       return await getAllControllersSummaryEndpoint(req, res);
     }
@@ -362,7 +317,6 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
       offset: offset ? parseInt(offset as string, 10) : undefined,
     });
 
-    // Transform DB events to API format
     const events = result.events.map((e) => ({
       index: e.event_index,
       date: e.event_date ? e.event_date.toISOString() : "",
@@ -390,7 +344,7 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
   }
 };
 
-// NEW: Get teaching statistics history
+
 export const getTeachingHistory = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, groupBy } = req.query;
@@ -421,7 +375,7 @@ export const getTeachingHistory = async (req: Request, res: Response) => {
   }
 };
 
-// NEW: Get all controllers summary
+
 export const getAllControllersSummaryEndpoint = async (req: Request, res: Response) => {
   try {
     const summary = await getAllControllersSummary();
@@ -440,7 +394,7 @@ export const getAllControllersSummaryEndpoint = async (req: Request, res: Respon
   }
 };
 
-// NEW: Get unique file names for filtering
+
 export const getTeachingFileNames = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -464,7 +418,7 @@ export const getTeachingFileNames = async (req: Request, res: Response) => {
   }
 };
 
-// NEW: Check if controller has teaching data
+
 export const checkTeachingData = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 

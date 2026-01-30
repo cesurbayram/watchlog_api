@@ -1,59 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { dbPool } from "../config/db";
+import { SaveAbsoEventsParams, AbsoEvent, AbsoEventFromDB, DailyAbsoStats } from "../models/abso-event-dto";
 
-// Types
-export interface AbsoEvent {
-  index: number;
-  date: string;
-  groupNumber: string;
-  axisNumber: string;
-  setValue: string;
-  currValue: {
-    R1: {
-      S?: number;
-      L?: number;
-      U?: number;
-      R?: number;
-      B?: number;
-      T?: number;
-    };
-  };
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-export interface SaveAbsoEventsParams {
-  controllerId: string;
-  events: AbsoEvent[];
-  fileModifiedAt?: Date;
-}
-
-export interface AbsoEventFromDB {
-  id: string;
-  controller_id: string;
-  event_index: number;
-  event_date: Date | null;
-  group_number: string | null;
-  axis_number: string | null;
-  set_value: string | null;
-  axis_s: number | null;
-  axis_l: number | null;
-  axis_u: number | null;
-  axis_r: number | null;
-  axis_b: number | null;
-  axis_t: number | null;
-  raw_entry: string | null;
-  created_at: Date;
-}
-
-export interface DailyAbsoStats {
-  stat_date: Date;
-  total_events: number;
-  axis_changes: number;
-}
-
-// Parse event date string to Date object
 const parseEventDate = (dateStr: string): Date | null => {
   if (!dateStr || dateStr.trim() === "") return null;
 
@@ -76,13 +24,11 @@ const parseEventDate = (dateStr: string): Date | null => {
   return null;
 };
 
-// Save ABSO events to database (upsert)
 export const saveAbsoEvents = async (
   params: SaveAbsoEventsParams
 ): Promise<{ syncId: string; eventsCount: number; newEventsCount: number }> => {
   const { controllerId, events, fileModifiedAt } = params;
 
-  // 1. Create sync record
   const syncId = uuidv4();
   await dbPool.query(
     `INSERT INTO abso_log_sync (id, controller_id, file_modified_at, total_events_parsed, status)
@@ -92,7 +38,6 @@ export const saveAbsoEvents = async (
 
   let newEventsCount = 0;
 
-  // 2. Upsert events
   for (const event of events) {
     const eventId = uuidv4();
     const eventDate = parseEventDate(event.date);
@@ -142,19 +87,18 @@ export const saveAbsoEvents = async (
     }
   }
 
-  // 3. Update daily statistics
+
   await updateDailyStatistics(controllerId, events);
 
   return { syncId, eventsCount: events.length, newEventsCount };
 };
 
-// Update daily statistics
+
 const updateDailyStatistics = async (controllerId: string, events: AbsoEvent[]): Promise<void> => {
-  // Group events by date
   const eventsByDate = new Map<string, AbsoEvent[]>();
 
   events.forEach((event) => {
-    const dateStr = event.date?.split(" ")[0]; // "2025/12/28" format
+    const dateStr = event.date?.split(" ")[0]; 
     if (dateStr && dateStr.includes("/")) {
       const [year, month, day] = dateStr.split("/");
       const normalizedDate = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
@@ -165,9 +109,7 @@ const updateDailyStatistics = async (controllerId: string, events: AbsoEvent[]):
     }
   });
 
-  // Upsert stats for each day
   for (const [dateStr, dayEvents] of eventsByDate) {
-    // Count axis changes (how many axes have values)
     let axisChanges = 0;
     dayEvents.forEach((e) => {
       const r1 = e.currValue?.R1 || {};
@@ -194,7 +136,6 @@ const updateDailyStatistics = async (controllerId: string, events: AbsoEvent[]):
   }
 };
 
-// Get ABSO events from database
 export const getAbsoEventsFromDB = async (
   controllerId: string,
   options?: {
@@ -222,14 +163,12 @@ export const getAbsoEventsFromDB = async (
 
   const whereClause = conditions.join(" AND ");
 
-  // Get total count
   const countResult = await dbPool.query(
     `SELECT COUNT(*) as total FROM abso_event WHERE ${whereClause}`,
     params
   );
   const total = parseInt(countResult.rows[0].total, 10);
 
-  // Get events with pagination
   const limit = options?.limit || 100;
   const offset = options?.offset || 0;
 
@@ -244,7 +183,6 @@ export const getAbsoEventsFromDB = async (
   return { events: eventsResult.rows, total };
 };
 
-// Get daily statistics from database
 export const getDailyAbsoStatisticsFromDB = async (
   controllerId: string,
   options?: {
@@ -299,7 +237,6 @@ export const getDailyAbsoStatisticsFromDB = async (
   return result.rows;
 };
 
-// Get all controllers ABSO summary
 export const getAllControllersAbsoSummary = async (): Promise<
   Array<{
     controller_id: string;
@@ -331,7 +268,6 @@ export const getAllControllersAbsoSummary = async (): Promise<
   return result.rows;
 };
 
-// Check if controller has ABSO data in DB
 export const hasAbsoData = async (controllerId: string): Promise<boolean> => {
   const result = await dbPool.query(
     `SELECT EXISTS(SELECT 1 FROM abso_event WHERE controller_id = $1) as has_data`,

@@ -1,29 +1,5 @@
 import crypto from "crypto";
-
-export interface SEC100SnapshotResponse {
-  header: {
-    status: number;
-    message: string;
-  };
-  data: {
-    result: number;
-  };
-}
-
-export interface SEC100SnapshotResult {
-  success: boolean;
-  result: number;
-  message: string;
-  timestamp: string;
-}
-
-export interface SEC100CameraConfig {
-  ipAddress: string;
-  wsPort?: number;
-  timeout?: number;
-  username?: string;
-  password?: string;
-}
+import { SEC100SnapshotResponse, SEC100SnapshotResult, SEC100CameraConfig } from "../models/sec100-dto";
 
 export class SEC100CameraService {
   private baseUrl: string;

@@ -11,58 +11,9 @@ import {
   getDailyAbsoStatisticsFromDB,
   getAllControllersAbsoSummary,
   hasAbsoData,
-  AbsoEvent as ServiceAbsoEvent,
 } from "../services/abso-event-service";
-
-interface R1Values {
-  S?: number;
-  L?: number;
-  U?: number;
-  R?: number;
-  B?: number;
-  T?: number;
-}
-
-interface AbsoluteDataEntry {
-  index: number;
-  date: string;
-  groupNumber: string;
-  axisNumber: string;
-  setValue: string;
-  currValue: { R1: R1Values };
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-interface AxisComparison {
-  axis: string;
-  oldValue: number;
-  newValue: number;
-  change: number;
-  changePercent: number;
-}
-
-interface AbsoStatistics {
-  totalAbsoEvents: number;
-  axisChanges: number;
-  changedAxes: string[];
-  lastChangeDate?: string;
-  changesByAxis: Record<string, number>;
-}
-
-interface AbsoLogsResponse {
-  success: boolean;
-  events: AbsoluteDataEntry[];
-  comparisons: AxisComparison[];
-  statistics: AbsoStatistics | null;
-  error?: string;
-  controllerId?: string;
-  controllerName?: string;
-  lastModified?: string;
-  savedToDb?: boolean;
-  newEventsCount?: number;
-}
+import { AbsoEvent as ServiceAbsoEvent } from "../models/abso-event-dto";
+import { R1Values, AbsoluteDataEntry, AxisComparison, AbsoStatistics, AbsoLogsResponse } from "../models/abso-event-dto";
 
 const parseCurrentValue = (currValueText: string): { R1: R1Values } => {
   const values: { R1: R1Values } = { R1: {} };
@@ -273,7 +224,6 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
     const comparisons = compareValues(absoEvents);
     const statistics = calculateStatistics(absoEvents);
 
-    // Save to database
     let savedToDb = false;
     let newEventsCount = 0;
     try {
@@ -284,7 +234,7 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
       });
       savedToDb = true;
       newEventsCount = saveResult.newEventsCount;
-      //console.log(`ABSO events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+
     } catch (dbError) {
       console.error("Error saving ABSO events to DB:", dbError);
     }
@@ -355,14 +305,14 @@ const handleAllControllersAbso = async (req: Request, res: Response) => {
           allAbsoEvents = allAbsoEvents.concat(absoEvents);
           processedCount++;
 
-          // Save to database for each controller
+
           try {
             const saveResult = await saveAbsoEvents({
               controllerId: controller.id,
               events: absoEvents as ServiceAbsoEvent[],
               fileModifiedAt: stats.mtime,
             });
-            //console.log(`ABSO events saved to DB for ${controller.name}: ${saveResult.eventsCount} total, ${saveResult.newEventsCount} new`);
+
           } catch (dbError) {
             console.error(`Error saving ABSO events to DB for ${controller.name}:`, dbError);
           }
@@ -372,7 +322,7 @@ const handleAllControllersAbso = async (req: Request, res: Response) => {
       }
     }
 
-    // Sort by date
+
     allAbsoEvents.sort((a, b) => {
       if (a.date && b.date) {
         const dateA = new Date(a.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
@@ -406,7 +356,7 @@ const handleAllControllersAbso = async (req: Request, res: Response) => {
   }
 };
 
-// Get ABSO events from database
+
 export const getAbsoEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, limit, offset } = req.query;
@@ -439,7 +389,7 @@ export const getAbsoEventsFromDatabase = async (req: Request, res: Response) => 
   }
 };
 
-// Get ABSO history/statistics from database
+
 export const getAbsoHistory = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, groupBy } = req.query;
@@ -468,7 +418,7 @@ export const getAbsoHistory = async (req: Request, res: Response) => {
   }
 };
 
-// Get all controllers ABSO summary from database
+
 export const getAllControllersAbsoSummaryEndpoint = async (req: Request, res: Response) => {
   try {
     const summary = await getAllControllersAbsoSummary();
@@ -486,7 +436,6 @@ export const getAllControllersAbsoSummaryEndpoint = async (req: Request, res: Re
   }
 };
 
-// Check if controller has ABSO data in database
 export const checkAbsoData = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 

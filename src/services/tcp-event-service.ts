@@ -1,60 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { dbPool } from "../config/db";
+import { SaveTCPEventsParams, TCPEvent, TCPEventFromDB, DailyTCPStats } from "../models/tcp-event-dto";
 
-// Types
-export interface ParsedElement {
-  toolNumber: number;
-  parameterGroup: number;
-  parameterGroupName: string;
-  parameterIndex: number;
-  parameterName: string;
-  actualToolNumber: number;
-}
-
-export interface TCPEvent {
-  index: number;
-  date: string;
-  event: string;
-  fileName: string;
-  elementNumber: string;
-  elementValue: string;
-  parsedElement: ParsedElement;
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-export interface SaveTCPEventsParams {
-  controllerId: string;
-  events: TCPEvent[];
-  fileModifiedAt?: Date;
-}
-
-export interface TCPEventFromDB {
-  id: string;
-  controller_id: string;
-  event_index: number;
-  event_date: Date | null;
-  event_name: string | null;
-  file_name: string | null;
-  element_number: string | null;
-  element_value: string | null;
-  tool_number: number | null;
-  parameter_group: number | null;
-  parameter_group_name: string | null;
-  parameter_index: number | null;
-  parameter_name: string | null;
-  raw_entry: string | null;
-  created_at: Date;
-}
-
-export interface DailyTCPStats {
-  stat_date: Date;
-  total_events: number;
-  tools_modified: number;
-}
-
-// Parse event date string to Date object
 const parseEventDate = (dateStr: string): Date | null => {
   if (!dateStr || dateStr.trim() === "") return null;
 
@@ -77,13 +24,11 @@ const parseEventDate = (dateStr: string): Date | null => {
   return null;
 };
 
-// Save TCP events to database (upsert)
 export const saveTCPEvents = async (
   params: SaveTCPEventsParams
 ): Promise<{ syncId: string; eventsCount: number; newEventsCount: number }> => {
   const { controllerId, events, fileModifiedAt } = params;
 
-  // 1. Create sync record
   const syncId = uuidv4();
   await dbPool.query(
     `INSERT INTO tcp_log_sync (id, controller_id, file_modified_at, total_events_parsed, status)
@@ -93,7 +38,6 @@ export const saveTCPEvents = async (
 
   let newEventsCount = 0;
 
-  // 2. Upsert events
   for (const event of events) {
     const eventId = uuidv4();
     const eventDate = parseEventDate(event.date);
@@ -142,15 +86,12 @@ export const saveTCPEvents = async (
     }
   }
 
-  // 3. Update daily statistics
   await updateDailyStatistics(controllerId, events);
 
   return { syncId, eventsCount: events.length, newEventsCount };
 };
 
-// Update daily statistics
 const updateDailyStatistics = async (controllerId: string, events: TCPEvent[]): Promise<void> => {
-  // Group events by date
   const eventsByDate = new Map<string, TCPEvent[]>();
 
   events.forEach((event) => {
@@ -189,7 +130,6 @@ const updateDailyStatistics = async (controllerId: string, events: TCPEvent[]): 
   }
 };
 
-// Get TCP events from database
 export const getTCPEventsFromDB = async (
   controllerId: string,
   options?: {
@@ -224,14 +164,12 @@ export const getTCPEventsFromDB = async (
 
   const whereClause = conditions.join(" AND ");
 
-  // Get total count
   const countResult = await dbPool.query(
     `SELECT COUNT(*) as total FROM tcp_event WHERE ${whereClause}`,
     params
   );
   const total = parseInt(countResult.rows[0].total, 10);
 
-  // Get events with pagination
   const limit = options?.limit || 100;
   const offset = options?.offset || 0;
 
@@ -246,7 +184,6 @@ export const getTCPEventsFromDB = async (
   return { events: eventsResult.rows, total };
 };
 
-// Get daily statistics from database
 export const getDailyTCPStatisticsFromDB = async (
   controllerId: string,
   options?: {
@@ -301,7 +238,6 @@ export const getDailyTCPStatisticsFromDB = async (
   return result.rows;
 };
 
-// Get all controllers TCP summary
 export const getAllControllersTCPSummary = async (): Promise<
   Array<{
     controller_id: string;
@@ -333,7 +269,6 @@ export const getAllControllersTCPSummary = async (): Promise<
   return result.rows;
 };
 
-// Check if controller has TCP data in DB
 export const hasTCPData = async (controllerId: string): Promise<boolean> => {
   const result = await dbPool.query(
     `SELECT EXISTS(SELECT 1 FROM tcp_event WHERE controller_id = $1) as has_data`,

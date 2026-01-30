@@ -35,6 +35,16 @@ export const MACHINE_CONFIGURATIONS: MachineRegisterMapping[] = [
     },
   },
   {
+    machineName: "FRONIUS-MHP-400i",
+    machineType: "FRONIUS",
+    registers: {
+      actualVoltage: [180],
+      actualCurrent: [181],
+      motorTorqueM1: [186],
+      motorTorqueM2: [187],
+    },
+  },
+  {
     machineName: "SKS-SYNCROWELD",
     machineType: "SKS",
     registers: {
@@ -45,21 +55,13 @@ export const MACHINE_CONFIGURATIONS: MachineRegisterMapping[] = [
 ];
 
 export const getMachineNamesByType = (machineType: MachineType): string[] => {
-  return MACHINE_CONFIGURATIONS.filter(
-    (config) => config.machineType === machineType
-  ).map((config) => config.machineName);
+  return MACHINE_CONFIGURATIONS.filter((config) => config.machineType === machineType).map((config) => config.machineName);
 };
 
-export const getMachineConfigByName = (
-  machineName: string
-): MachineRegisterMapping | undefined => {
-  return MACHINE_CONFIGURATIONS.find(
-    (config) => config.machineName === machineName
-  );
+export const getMachineConfigByName = (machineName: string): MachineRegisterMapping | undefined => {
+  return MACHINE_CONFIGURATIONS.find((config) => config.machineName === machineName);
 };
 
 export const getAllMachineTypes = (): MachineType[] => {
-  return [
-    ...new Set(MACHINE_CONFIGURATIONS.map((config) => config.machineType)),
-  ];
+  return [...new Set(MACHINE_CONFIGURATIONS.map((config) => config.machineType))];
 };

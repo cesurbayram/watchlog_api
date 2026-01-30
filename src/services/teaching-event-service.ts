@@ -1,48 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { dbPool } from "../config/db";
+import { SaveTeachingEventsParams, TeachingEvent, TeachingEventFromDB, DailyStats } from "../models/teaching-event-dto";
 
-// Types
-export interface TeachingEvent {
-  index: number;
-  date: string;
-  type: "POINT_MODIFICATION" | "INSTRUCTION_INSERT" | "INSTRUCTION_DELETE" | "TEACH_MODE";
-  fileName?: string;
-  lineNumber?: string;
-  details: string;
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-export interface SaveTeachingEventsParams {
-  controllerId: string;
-  events: TeachingEvent[];
-  fileModifiedAt?: Date;
-}
-
-export interface TeachingEventFromDB {
-  id: string;
-  controller_id: string;
-  event_index: number;
-  event_date: Date | null;
-  event_type: string;
-  file_name: string | null;
-  line_number: string | null;
-  details: string | null;
-  raw_entry: string | null;
-  created_at: Date;
-}
-
-export interface DailyStats {
-  stat_date: Date;
-  point_modifications: number;
-  instruction_inserts: number;
-  instruction_deletes: number;
-  teach_mode_activations: number;
-  total_events: number;
-}
-
-// Parse event date string to Date object
 const parseEventDate = (dateStr: string): Date | null => {
   if (!dateStr || dateStr.trim() === "") return null;
 
@@ -65,11 +24,11 @@ const parseEventDate = (dateStr: string): Date | null => {
   return null;
 };
 
-// Save teaching events to database (upsert)
+
 export const saveTeachingEvents = async (params: SaveTeachingEventsParams): Promise<{ syncId: string; eventsCount: number; newEventsCount: number }> => {
   const { controllerId, events, fileModifiedAt } = params;
 
-  // 1. Create sync record
+
   const syncId = uuidv4();
   await dbPool.query(
     `INSERT INTO teaching_log_sync (id, controller_id, file_modified_at, total_events_parsed, status)
@@ -79,7 +38,7 @@ export const saveTeachingEvents = async (params: SaveTeachingEventsParams): Prom
 
   let newEventsCount = 0;
 
-  // 2. Upsert events
+
   for (const event of events) {
     const eventId = uuidv4();
     const eventDate = parseEventDate(event.date);
@@ -105,19 +64,19 @@ export const saveTeachingEvents = async (params: SaveTeachingEventsParams): Prom
     }
   }
 
-  // 3. Update daily statistics
+
   await updateDailyStatistics(controllerId, events);
 
   return { syncId, eventsCount: events.length, newEventsCount };
 };
 
-// Update daily statistics
+
 const updateDailyStatistics = async (controllerId: string, events: TeachingEvent[]): Promise<void> => {
-  // Group events by date
+
   const eventsByDate = new Map<string, TeachingEvent[]>();
 
   events.forEach((event) => {
-    const dateStr = event.date.split(" ")[0]; // "2025/12/28" format
+    const dateStr = event.date.split(" ")[0];
     if (dateStr && dateStr.includes("/")) {
       const [year, month, day] = dateStr.split("/");
       const normalizedDate = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
@@ -128,7 +87,7 @@ const updateDailyStatistics = async (controllerId: string, events: TeachingEvent
     }
   });
 
-  // Upsert stats for each day
+
   for (const [dateStr, dayEvents] of eventsByDate) {
     const stats = {
       pointModifications: dayEvents.filter((e) => e.type === "POINT_MODIFICATION").length,
@@ -156,7 +115,7 @@ const updateDailyStatistics = async (controllerId: string, events: TeachingEvent
   }
 };
 
-// Get teaching events from database
+
 export const getTeachingEventsFromDB = async (
   controllerId: string,
   options?: {
@@ -198,11 +157,11 @@ export const getTeachingEventsFromDB = async (
 
   const whereClause = conditions.join(" AND ");
 
-  // Get total count
+
   const countResult = await dbPool.query(`SELECT COUNT(*) as total FROM teaching_event WHERE ${whereClause}`, params);
   const total = parseInt(countResult.rows[0].total, 10);
 
-  // Get events with pagination
+
   const limit = options?.limit || 100;
   const offset = options?.offset || 0;
 
@@ -217,7 +176,7 @@ export const getTeachingEventsFromDB = async (
   return { events: eventsResult.rows, total };
 };
 
-// Get daily statistics from database
+
 export const getDailyStatisticsFromDB = async (
   controllerId: string,
   options?: {
@@ -256,7 +215,6 @@ export const getDailyStatisticsFromDB = async (
     default:
       groupExpression = "stat_date";
   }
-
   const result = await dbPool.query(
     `SELECT 
       ${groupExpression} as stat_date,
@@ -275,7 +233,6 @@ export const getDailyStatisticsFromDB = async (
   return result.rows;
 };
 
-// Get all controllers summary
 export const getAllControllersSummary = async (): Promise<
   Array<{
     controller_id: string;
@@ -313,7 +270,6 @@ export const getAllControllersSummary = async (): Promise<
   return result.rows;
 };
 
-// Get unique file names for a controller
 export const getUniqueFileNames = async (controllerId: string): Promise<string[]> => {
   const result = await dbPool.query(
     `SELECT DISTINCT file_name 
@@ -326,7 +282,6 @@ export const getUniqueFileNames = async (controllerId: string): Promise<string[]
   return result.rows.map((row) => row.file_name);
 };
 
-// Check if controller has teaching data in DB
 export const hasTeachingData = async (controllerId: string): Promise<boolean> => {
   const result = await dbPool.query(`SELECT EXISTS(SELECT 1 FROM teaching_event WHERE controller_id = $1) as has_data`, [controllerId]);
   return result.rows[0].has_data;

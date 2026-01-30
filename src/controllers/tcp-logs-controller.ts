@@ -11,65 +11,9 @@ import {
   getDailyTCPStatisticsFromDB,
   getAllControllersTCPSummary,
   hasTCPData,
-  TCPEvent as ServiceTCPEvent,
 } from "../services/tcp-event-service";
+import { TCPEvent as ServiceTCPEvent, ParsedElement, TCPDataEntry, TCPComparison, TCPStatistics, TCPLogsResponse } from "../models/tcp-event-dto";
 
-// Types
-interface ParsedElement {
-  toolNumber: number;
-  parameterGroup: number;
-  parameterGroupName: string;
-  parameterIndex: number;
-  parameterName: string;
-  actualToolNumber: number;
-}
-
-interface TCPDataEntry {
-  index: number;
-  date: string;
-  event: string;
-  fileName: string;
-  elementNumber: string;
-  elementValue: string;
-  parsedElement: ParsedElement;
-  rawEntry: string;
-  controllerId?: string;
-  controllerName?: string;
-}
-
-interface TCPComparison {
-  toolNumber: number;
-  parameterName: string;
-  parameterGroupName: string;
-  elementNumber: string;
-  oldValue: number;
-  newValue: number;
-  change: number;
-  changePercent: number;
-}
-
-interface TCPStatistics {
-  totalTCPChanges: number;
-  toolsModified: number;
-  uniqueTools: string[];
-  lastChangeDate?: string;
-  changesByParameter: Record<string, number>;
-}
-
-interface TCPLogsResponse {
-  success: boolean;
-  events: TCPDataEntry[];
-  comparisons: TCPComparison[];
-  statistics: TCPStatistics | null;
-  error?: string;
-  controllerId?: string;
-  controllerName?: string;
-  lastModified?: string;
-  savedToDb?: boolean;
-  newEventsCount?: number;
-}
-
-// Parse element number to get tool and parameter info
 const parseElementNumber = (elementNumber: string): ParsedElement | null => {
   const parts = elementNumber.split("-");
   if (parts.length !== 3) {
@@ -107,7 +51,7 @@ const parseElementNumber = (elementNumber: string): ParsedElement | null => {
   };
 };
 
-// Extract TCP data events from log entries
+
 const extractTCPDataEvents = (logEntries: LogEntry[], controllerId?: string, controllerName?: string): TCPDataEntry[] => {
   const events: TCPDataEntry[] = [];
 
@@ -129,7 +73,7 @@ const extractTCPDataEvents = (logEntries: LogEntry[], controllerId?: string, con
       elementValue = afterEdit;
     }
 
-    // Fallback parsing from raw data
+
     if (!fileName && entry.rawData) {
       const m = entry.rawData.match(/FILE NAME\s*:\s*(\S+)/i);
       if (m) fileName = m[1];
@@ -173,7 +117,7 @@ const extractTCPDataEvents = (logEntries: LogEntry[], controllerId?: string, con
   });
 };
 
-// Compare values between entries
+
 const compareValues = (entries: TCPDataEntry[]): TCPComparison[] => {
   if (entries.length < 2) return [];
 
@@ -205,7 +149,7 @@ const compareValues = (entries: TCPDataEntry[]): TCPComparison[] => {
   return comparisons;
 };
 
-// Calculate statistics
+
 const calculateStatistics = (events: TCPDataEntry[]): TCPStatistics => {
   const uniqueToolsSet = new Set<string>();
   const changesByParameter: Record<string, number> = {};
@@ -225,7 +169,6 @@ const calculateStatistics = (events: TCPDataEntry[]): TCPStatistics => {
   };
 };
 
-// Get TCP logs for a single controller
 export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -234,7 +177,7 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   }
 
   try {
-    // Handle "all" - aggregate all controllers
+
     if (controllerId === "all") {
       return await handleAllControllersTCP(req, res);
     }
@@ -275,7 +218,7 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
     const comparisons = compareValues(tcpEvents);
     const statistics = calculateStatistics(tcpEvents);
 
-    // Save to database
+
     let savedToDb = false;
     let newEventsCount = 0;
     try {
@@ -286,7 +229,7 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
       });
       savedToDb = true;
       newEventsCount = saveResult.newEventsCount;
-      //console.log(`TCP events saved to DB for ${controllerName}: ${saveResult.eventsCount} total, ${newEventsCount} new`);
+
     } catch (dbError) {
       console.error("Error saving TCP events to DB:", dbError);
     }
@@ -316,7 +259,7 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   }
 };
 
-// Handle all controllers aggregation
+
 const handleAllControllersTCP = async (req: Request, res: Response) => {
   try {
     const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
@@ -357,14 +300,14 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
           allTCPEvents = allTCPEvents.concat(tcpEvents);
           processedCount++;
 
-          // Save to database for each controller
+
           try {
             const saveResult = await saveTCPEvents({
               controllerId: controller.id,
               events: tcpEvents as ServiceTCPEvent[],
               fileModifiedAt: stats.mtime,
             });
-            //console.log(`TCP events saved to DB for ${controller.name}: ${saveResult.eventsCount} total, ${saveResult.newEventsCount} new`);
+
           } catch (dbError) {
             console.error(`Error saving TCP events to DB for ${controller.name}:`, dbError);
           }
@@ -374,7 +317,7 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
       }
     }
 
-    // Sort by date
+
     allTCPEvents.sort((a, b) => {
       if (a.date && b.date) {
         const dateA = new Date(a.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
@@ -408,7 +351,7 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
   }
 };
 
-// Get TCP events from database
+
 export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, toolNumber, limit, offset } = req.query;
@@ -442,7 +385,7 @@ export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
   }
 };
 
-// Get TCP history/statistics from database
+
 export const getTcpHistory = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, groupBy } = req.query;
@@ -471,7 +414,7 @@ export const getTcpHistory = async (req: Request, res: Response) => {
   }
 };
 
-// Get all controllers TCP summary from database
+
 export const getAllControllersTcpSummaryEndpoint = async (req: Request, res: Response) => {
   try {
     const summary = await getAllControllersTCPSummary();
@@ -489,7 +432,7 @@ export const getAllControllersTcpSummaryEndpoint = async (req: Request, res: Res
   }
 };
 
-// Check if controller has TCP data in database
+
 export const checkTcpData = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 

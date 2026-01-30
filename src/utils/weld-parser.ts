@@ -2,84 +2,13 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import os from "os";
-
-export interface WeldRawData {
-  date: string;
-  time: string;
-  factory: string;
-  line: string;
-  cell: string;
-  partSerialId: string;
-  partItemNumber: string;
-  partVersion: string;
-  jobName: string;
-  seamNumber: number;
-  weldLength: number;
-  setVoltage: number | null;
-  setCurrent: number | null;
-  averageVoltage: number | null;
-  averageCurrent: number | null;
-  actualVoltage: number | null;
-  actualCurrent: number | null;
-  wireSpeed: number | null;
-  torqueM1: number | null;
-  torqueM2: number | null;
-  averageGasFlow: number | null;
-  actualGasFlow: number | null;
-  gasConsumption: number | null;
-  weldDuration: number | null;
-  weldingSpeed: number | null;
-  wireConsumption: number | null;
-  machine: string;
-  processTime: string | null;
-  ipAddress: string;
-  toolNo: number | null;
-  dataPart: number | null;
-  groupType: string | null;
-}
-
-interface WeldHeaderRow {
-  DataPart: string;
-  Factory: string;
-  Line: string;
-  Cell: string;
-  PartSerialID: string;
-  PartItemNumber: string;
-  PartVersion: string;
-  SeamNumber: number;
-  ToolNo: number | null;
-  WeldLength: number;
-  SetVoltage: number | null;
-  SetCurrent: number | null;
-  AvarageVoltage: number | null;
-  AvarageCurrent: number | null;
-  AvarageGasFlow: number | null;
-  GasConsumption: number | null;
-  WeldDuration: number | null;
-  WeldingSpeed: number | null;
-  WireConsumption: number | null;
-  MachineName: string;
-  IpAdress: string;
-  JobName: string;
-  GroupType: string | null;
-}
-
-interface WeldDetailRow {
-  Id: number;
-  DataPart: string;
-  DateTime: string;
-  ActualVoltage: number | null;
-  ActualCurrent: number | null;
-  WireSpeed: number | null;
-  MotorTorqueM1: number | null;
-  MotorTorqueM2: number | null;
-  ActualGasFlow: number | null;
-}
+import { WeldHeaderRow, WeldDetailRow, WeldRawData } from "../models/weld-dto";
 
 interface JoinedWeldRow extends WeldHeaderRow, Omit<WeldDetailRow, "DataPart"> {}
 
 export function getWeldDirectory(ipAddress: string): string {
-  const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Weld" : path.join(os.homedir(), "Watchlog", "Weld"));
+  const baseDir =
+    process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Weld" : path.join(os.homedir(), "Watchlog", "Weld"));
 
   return path.join(baseDir, `${ipAddress}_Weld`);
 }

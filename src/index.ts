@@ -28,6 +28,9 @@ import auth from "./middleware/auth-middleware.js";
 import mailRoutes from "./routes/mail.js";
 import { startCronJobs } from "./schedule-job/schedule-cron.js";
 import companySettingsRoutes from "./routes/company-setting.js";
+import tcpLogsRoutes from "./routes/tcp-logs.js";
+import teachingLogsRoutes from "./routes/teaching-logs.js";
+import absoLogsRoutes from "./routes/abso-logs.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -61,7 +64,10 @@ app.use("/api-v2/quick-assist", quickAssistRoutes);
 app.use("/api-v2/system-reports", systemReportsRoutes);
 app.use("/api-v2/weld", weldRoutes);
 app.use("/api-v2/mail", mailRoutes);
-app.use("/api-v2/settings", companySettingsRoutes)
+app.use("/api-v2/tcp-logs", tcpLogsRoutes);
+app.use("/api-v2/teaching-logs", teachingLogsRoutes);
+app.use("/api-v2/abso-logs", absoLogsRoutes);
+app.use("/api-v2/settings", companySettingsRoutes);
 
 startCronJobs();
 

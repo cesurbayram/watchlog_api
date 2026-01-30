@@ -1,10 +1,4 @@
-export interface RobotMaintenanceIntervals {
-  periodicMaintenance: number;
-  internalCable: number | "yok";
-  overhaul: number;
-  belt: "var" | "yok";
-  gasBalancer: "var" | "yok";
-}
+import { RobotMaintenanceIntervals } from "../models/maintenace-dto";
 
 const DEFAULT_INTERVALS: RobotMaintenanceIntervals = {
   periodicMaintenance: 6000,

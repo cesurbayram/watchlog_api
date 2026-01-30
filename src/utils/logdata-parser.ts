@@ -1,15 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-
-export interface ParsedLogEntry {
-  index: number;
-  date?: string;
-  event?: string;
-  loginName?: string;
-  fields: Record<string, string>;
-  rawData: string;
-}
+import { ParsedLogEntry } from "../models/logdata.dto";
 
 export function parseLogContent(content: string, maxEntries: number = 100): ParsedLogEntry[] {
   const entries: ParsedLogEntry[] = [];

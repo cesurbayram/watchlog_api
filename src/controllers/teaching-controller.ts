@@ -1,17 +1,7 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import { v4 as uuidv4 } from "uuid";
-
-interface ComparisonResult {
-  id?: string;
-  file1Name: string;
-  file2Name: string;
-  file1Format?: string;
-  file2Format?: string;
-  comparisonDate?: string;
-  differences: any;
-  statistics: any;
-}
+import { ComparisonResult } from "../models/teaching-event-dto";
 
 const saveComparison = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
