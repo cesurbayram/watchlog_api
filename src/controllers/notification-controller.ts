@@ -1,16 +1,19 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
-import { v4 as uuidv4 } from "uuid";
+import { broadcastAndInsertNotification } from "../utils/notification";
 
 const getNotifications = async (req: Request, res: Response) => {
+  const { user_id } = req.query
+  
+  
   try {
     let query = `
-          SELECT id, type, title, message, data, user_id, is_read, created_at, updated_at
-          FROM notifications ORDER BY created_at DESC
+          SELECT id, type, title, message, data, user_id, is_read, created_at, updated_at, notification_id
+          FROM notifications WHERE user_id = $1 ORDER BY created_at DESC 
          
         `;
 
-    const notificationDbRes = await dbPool.query(query);
+    const notificationDbRes = await dbPool.query(query, [user_id]);
     const notifications = notificationDbRes.rows;
 
     const response = {
@@ -27,51 +30,27 @@ const getNotifications = async (req: Request, res: Response) => {
 };
 
 const createNotification = async (req: Request, res: Response) => {
-  const { type, title, message, data, user_id } = req.body;
+  const { type, title, message, data } = req.body;
 
   if (!type || !title || !message) {
     return res.status(400).json({ error: "Missing required fields: type, title, message" });
   }
 
-  const notificationId = uuidv4();
-
-  const client = await dbPool.connect();
-
   try {
-    const result = await client.query(
-      `INSERT INTO notifications (id, type, title, message, data, user_id, is_read) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) 
-       RETURNING *`,
-      [notificationId, type, title, message, data || null, user_id || null, false],
-    );
-
-    const newNotification = result.rows[0];
-
-    try {
-      await fetch(`${process.env.NOTIFICATION_SERVER_URL}/notify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newNotification),
-      });
-    } catch (error) {
-      console.error("Error sending notification to notification server:", error);
-    }
-
+    const newNotification = await broadcastAndInsertNotification({data, message, title, type})
     return res.status(201).json(newNotification);
   } catch (error) {
     console.error("Error creating notification:", error);
     return res.status(500).json({ error: "Failed to create notification" });
-  } finally {
-    client.release();
   }
 };
 
 const deleteAllNotifications = async (req: Request, res: Response) => {
+  const {userId} = req.params
+  
   const client = await dbPool.connect();
   try {
-    const result = await client.query("DELETE FROM notifications");
+    const result = await client.query("DELETE FROM notifications WHERE user_id = $1", [userId]);
 
     return res.status(200).json({
       success: true,
@@ -86,20 +65,16 @@ const deleteAllNotifications = async (req: Request, res: Response) => {
 };
 
 const markReadAllNotifications = async (req: Request, res: Response) => {
-  const { notification_ids } = req.body;
+  const { notification_ids, user_id } = req.body;
+    
 
   const client = await dbPool.connect();
 
   try {
-    let query = `UPDATE notifications SET is_read = true, updated_at = CURRENT_TIMESTAMP WHERE `;
-    let params = [];
+    let query = `UPDATE notifications SET is_read = true, updated_at = CURRENT_TIMESTAMP WHERE notification_id = ANY($1) AND user_id = $2`;
+    
 
-    if (notification_ids && notification_ids.length > 0) {
-      query += `id = ANY($1)`;
-      params.push(notification_ids);
-    }
-
-    const result = await client.query(query, params);
+    const result = await client.query(query, [notification_ids, user_id]);
 
     return res.status(200).json({
       message: "Notifications marked as read",
@@ -114,7 +89,7 @@ const markReadAllNotifications = async (req: Request, res: Response) => {
 };
 
 const deleteNotificationById = async (req: Request, res: Response) => {
-  const notificationId = req.params?.id;
+  const {notificationId, userId} = req.params;
 
   if (!notificationId) {
     return res.status(400).json({ error: "ID is required" });
@@ -124,7 +99,7 @@ const deleteNotificationById = async (req: Request, res: Response) => {
 
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM notifications WHERE id = $1", [notificationId]);
+    await client.query("DELETE FROM notifications WHERE notification_id = $1 AND user_id = $2", [notificationId, userId]);
     await client.query("COMMIT");
 
     return res.status(200).json({ success: true });

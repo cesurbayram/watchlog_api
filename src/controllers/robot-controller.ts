@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import { RobotRequestDto, RobotResponseDto } from "../models/robot-dto";
 import { v4 as uuidv4 } from "uuid";
+import { broadcastAndInsertNotification } from "../utils/notification";
 
 const alarmTableMap: { [key: string]: string } = {
   detected: "alarm",
@@ -118,6 +119,18 @@ const createRobot = async (req: Request, res: Response) => {
         `,
       [newRobotId, name, model, application, ipAddress, status, serialNumber, intervalMs, maxConnection, location, newRobotStatusId],
     );
+
+    await broadcastAndInsertNotification({
+      type: "controller_added",
+      title: "New Controller Added",
+      message: `Controller "${name}" has been added to the system`,
+      data: {
+        controller_id: newRobotId,
+        controller_name: name,
+        severity: "info",
+        timestamp: new Date().toISOString(),
+      },
+    })
 
     await client.query("COMMIT");
 
