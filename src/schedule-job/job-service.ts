@@ -21,23 +21,30 @@ export const processScheduledMails = async () => {
     const mailToBeSendData = mailToBeSendDbRes.rows;
 
     for (const item of mailToBeSendData) {
-      await sendMail({
-        email: item?.email_recipient,
-        message: item?.mail_text,
-        subject: item?.mail_subject
-      });
+      try {
+        await sendMail({
+          email: item?.email_recipient,
+          message: item?.mail_text,
+          subject: item?.mail_subject
+        });
+        await client.query(
+          `
+              UPDATE scheduled_mail_jobs SET status = 'SENT' WHERE id=$1  
+          `,
+          [item?.id],
+        );
+        
+      } catch (mailError) {
+        console.error("Mail send failed:", mailError);
 
-      await client.query(
-        `
-            UPDATE scheduled_mail_jobs SET status = 'SENT' WHERE id=$1  
-        `,
-        [item?.id],
-      );
+        await client.query(
+          `UPDATE scheduled_mail_jobs SET status = 'FAIL' WHERE id = $1`,
+          [item.id],
+        ); 
+      }
     }
-
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
     console.error("Mail process error:", error);
   } finally {
     client.release();

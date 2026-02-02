@@ -44,4 +44,26 @@ const createScheduledMail = async (req: Request, res: Response) => {
   }
 };
 
-export { sendMailHandler, createScheduledMail };
+const getScheduleMailData = async (req: Request, res: Response) => {
+  try {
+    const scheduledMailDbRes = await dbPool.query(`SELECT * FROM scheduled_mail_jobs`)
+    const scheduledMailStatisticDbRes = await dbPool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'SENT') as "sentCount",
+        COUNT(*) FILTER (WHERE status = 'PENDING') as "pendingCount",
+        COUNT(*) FILTER (WHERE status = 'FAIL') as "failCount"
+      FROM scheduled_mail_jobs
+    `)    
+
+    const scheduledMailRes = {
+      data: scheduledMailDbRes.rows || [],
+      counts: scheduledMailStatisticDbRes.rows[0]
+    }
+    return res.status(200).json(scheduledMailRes); 
+  } catch (error: any) {
+    console.error("DB ERROR:", error.message);
+    return res.status(500).json({message: 'Internal Server Error'})
+  }
+}
+
+export { sendMailHandler, createScheduledMail, getScheduleMailData };
