@@ -19,7 +19,17 @@ const getRoleById = async (req: Request, res: Response) => {
   const roleId = req.params?.id;
 
   try {
-    const roleDbRes = await dbPool.query(`SELECT * FROM role WHERE id = $1`, [roleId]);
+    const roleDbRes = await dbPool.query(
+      `SELECT
+            r.id,
+            r.name,
+            JSON_AGG(rp.page_id) AS "selectedPages"
+        FROM role r
+                LEFT JOIN role_permission rp ON r.id = rp.role_id
+        WHERE r.id = $1
+        GROUP BY r.id, r.name;`,
+      [roleId],
+    );
     const roleData = roleDbRes.rows[0];
     return res.status(200).json(roleData);
   } catch (error) {
