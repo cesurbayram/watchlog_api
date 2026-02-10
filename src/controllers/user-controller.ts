@@ -23,7 +23,7 @@ const createUser = async (req: Request, res: Response) => {
     const bcryptPassword = password && (await bcrypt.hash(password, saltRounds));
 
     await client.query(
-      `INSERT INTO "users" (id, name, last_name, user_name, email, role, bcrypt_password) 
+      `INSERT INTO "users" (id, name, last_name, user_name, email, role_id, bcrypt_password) 
             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [newUserId, name, lastName, userName, email, role, bcryptPassword],
     );
@@ -47,7 +47,7 @@ const updateUser = async (req: Request, res: Response) => {
     await client.query("BEGIN");
     await client.query(
       `UPDATE "users" 
-                SET name = $1, last_name = $2, email = $3, role = $4, user_name = $5, updated_at = now() 
+                SET name = $1, last_name = $2, email = $3, role_id = $4, user_name = $5, updated_at = now() 
                 WHERE id = $6`,
       [name, lastName, email, role, userName, userId],
     );
@@ -90,7 +90,7 @@ const getUserById = async (req: Request, res: Response) => {
                 u.last_name AS "lastName",
                 u.user_name AS "userName",
                 u.email,
-                u.role                                 
+                u.role_id                                 
             FROM users u
             WHERE u.id = $1`,
       [userId],
@@ -118,9 +118,9 @@ const getUsers = async (req: Request, res: Response) => {
             u.last_name AS "lastName", 
             u.user_name AS "userName", 
             u.email, 
-            u.role
+            r.name as role
         FROM 
-            "users" u
+            "users" u LEFT JOIN role r ON u.role_id = r.id
         ORDER BY u.created_at DESC`);
 
     const usersData = userDbRes.rows;

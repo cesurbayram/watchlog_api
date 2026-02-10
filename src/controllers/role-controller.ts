@@ -52,17 +52,6 @@ const createRole = async (req: Request, res: Response) => {
       [newRoleId, name],
     );
 
-    // for (const page of selectedPages) {
-    //   const newPermissionId = uuidv4();
-    //   await client.query(
-    //     `
-    //         INSERT INTO role_permission (id, role_id, page_id)
-    //             VALUES ($1, $2, $3)
-    //     `,
-    //     [newPermissionId, newRoleId, page],
-    //   );
-    // }
-
     await client.query(
       `
         INSERT INTO role_permission (id, role_id, page_id)

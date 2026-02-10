@@ -17,10 +17,11 @@ const login = async (req: Request, res: Response) => {
                     u.name,
                     u.last_name AS "lastName", 
                     u.user_name AS "userName", 
-                    u.email, 
-                    u.role,
+                    u.email,
+                    u.role_id AS "roleId",
+                    r.name AS "roleName", 
                     u.bcrypt_password as "bcryptPassword"
-                FROM users u WHERE u.email = $1
+                FROM users u LEFT JOIN role r ON u.role_id=r.id WHERE u.email = $1
             `,
       [email],
     );
@@ -42,7 +43,8 @@ const login = async (req: Request, res: Response) => {
       lastName: userData.lastName,
       userName: userData.userName,
       email: userData.email,
-      role: userData.role,
+      roleId: userData.roleId,
+      roleName: userData.roleName,
     };
 
     const secret = process.env.SECRET;
