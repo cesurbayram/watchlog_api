@@ -1,173 +1,21 @@
 import { Request, Response } from "express";
+import TCPEventModel from "../models/mongo/tcp-event.model";
+import { compareTCPValues, calculateTCPStatistics } from "../services/tcp-parser.service";
+import { TCPDataEntry, TCPLogsResponse } from "../models/tcp-event-dto";
 import { dbPool } from "../config/db";
-import path from "path";
-import os from "os";
-import fs from "fs";
-import { LogEntry } from "../models/log-content";
-import { parseLogContent } from "../utils/cmos-backup";
-import {
-  saveTCPEvents,
-  getTCPEventsFromDB,
-  getDailyTCPStatisticsFromDB,
-  getAllControllersTCPSummary,
-  hasTCPData,
-} from "../services/tcp-event-service";
-import { TCPEvent as ServiceTCPEvent, ParsedElement, TCPDataEntry, TCPComparison, TCPStatistics, TCPLogsResponse } from "../models/tcp-event-dto";
 
-const parseElementNumber = (elementNumber: string): ParsedElement | null => {
-  const parts = elementNumber.split("-");
-  if (parts.length !== 3) {
-    return null;
-  }
-
-  const N = parseInt(parts[0]);
-  const M = parseInt(parts[1]);
-  const K = parseInt(parts[2]);
-
-  let parameterName = "Unknown";
-  let parameterGroupName = "Unknown";
-
-  if (M === 1) {
-    const toolDataNames = ["X", "Y", "Z", "Rx", "Ry", "Rz"];
-    parameterName = toolDataNames[K] || "Unknown";
-    parameterGroupName = "TOOL Data";
-  } else if (M === 2) {
-    const toolDataNames = ["X", "Y", "Z", "Rx", "Ry", "Rz"];
-    parameterName = toolDataNames[K] || "Unknown";
-    parameterGroupName = "TOOL Data (M=2)";
-  } else if (M === 9) {
-    const toolGeometryNames = ["Xg", "Yg", "Zg", "Ix", "Iy", "Iz"];
-    parameterName = toolGeometryNames[K] || "Unknown";
-    parameterGroupName = "TOOL Geometry";
-  }
-
-  return {
-    toolNumber: N,
-    parameterGroup: M,
-    parameterGroupName,
-    parameterIndex: K,
-    parameterName,
-    actualToolNumber: N - 1,
-  };
-};
-
-
-const extractTCPDataEvents = (logEntries: LogEntry[], controllerId?: string, controllerName?: string): TCPDataEntry[] => {
-  const events: TCPDataEntry[] = [];
-
-  logEntries.forEach((entry) => {
-    const event = entry.event?.toLowerCase() || "";
-
-    const fields = entry.fields || {};
-    const fileNameFieldKey = Object.keys(fields).find((k) => k.trim().toLowerCase() === "file name");
-    const elementNumberKey = Object.keys(fields).find((k) => k.trim().toLowerCase() === "element number");
-    const elementValueKey = Object.keys(fields).find((k) => k.trim().toLowerCase() === "element value");
-    const afterEditKey = Object.keys(fields).find((k) => k.trim().toLowerCase() === "after edit");
-
-    let fileName = (fileNameFieldKey ? fields[fileNameFieldKey] : "") || "";
-    let elementNumber = (elementNumberKey ? fields[elementNumberKey] : "") || "";
-    let elementValue = (elementValueKey ? fields[elementValueKey] : "") || "";
-    const afterEdit = (afterEditKey ? fields[afterEditKey] : "") || "";
-
-    if (!elementValue && afterEdit) {
-      elementValue = afterEdit;
-    }
-
-
-    if (!fileName && entry.rawData) {
-      const m = entry.rawData.match(/FILE NAME\s*:\s*(\S+)/i);
-      if (m) fileName = m[1];
-    }
-    if (!elementNumber && entry.rawData) {
-      const m = entry.rawData.match(/ELEMENT NUMBER\s*:\s*([\d-]+)/i);
-      if (m) elementNumber = m[1];
-    }
-    if (!elementValue && entry.rawData) {
-      const m = entry.rawData.match(/ELEMENT VALUE\s*:\s*([-+]?\d+(?:\.\d+)?)/i);
-      if (m) elementValue = m[1];
-    }
-
-    if ((event.includes("other file edit") || event.includes("other file edt")) && fileName.toLowerCase() === "tool") {
-      const parsedElement = parseElementNumber(elementNumber);
-
-      if (parsedElement) {
-        events.push({
-          index: entry.index,
-          date: entry.date || "",
-          event: entry.event || "",
-          fileName,
-          elementNumber,
-          elementValue,
-          parsedElement,
-          rawEntry: entry.rawData,
-          controllerId,
-          controllerName,
-        });
-      }
-    }
-  });
-
-  return events.sort((a, b) => {
-    if (a.date && b.date) {
-      const dateA = new Date(a.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
-      const dateB = new Date(b.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
-      return dateB.getTime() - dateA.getTime();
-    }
-    return b.index - a.index;
-  });
-};
-
-
-const compareValues = (entries: TCPDataEntry[]): TCPComparison[] => {
-  if (entries.length < 2) return [];
-
-  const comparisons: TCPComparison[] = [];
-
-  for (let i = 0; i < Math.min(entries.length - 1, 5); i++) {
-    const current = entries[i];
-    const previous = entries[i + 1];
-
-    if (current.elementNumber === previous.elementNumber) {
-      const newVal = parseFloat(current.elementValue) || 0;
-      const oldVal = parseFloat(previous.elementValue) || 0;
-      const change = newVal - oldVal;
-      const changePercent = oldVal !== 0 ? (change / Math.abs(oldVal)) * 100 : 0;
-
-      comparisons.push({
-        toolNumber: current.parsedElement.actualToolNumber,
-        parameterName: current.parsedElement.parameterName,
-        parameterGroupName: current.parsedElement.parameterGroupName,
-        elementNumber: current.elementNumber,
-        oldValue: oldVal,
-        newValue: newVal,
-        change,
-        changePercent,
-      });
-    }
-  }
-
-  return comparisons;
-};
-
-
-const calculateStatistics = (events: TCPDataEntry[]): TCPStatistics => {
-  const uniqueToolsSet = new Set<string>();
-  const changesByParameter: Record<string, number> = {};
-
-  events.forEach((event) => {
-    uniqueToolsSet.add(`TOOL ${event.parsedElement.actualToolNumber}`);
-    const paramKey = event.parsedElement.parameterName;
-    changesByParameter[paramKey] = (changesByParameter[paramKey] || 0) + 1;
-  });
-
-  return {
-    totalTCPChanges: events.length,
-    toolsModified: uniqueToolsSet.size,
-    uniqueTools: Array.from(uniqueToolsSet),
-    lastChangeDate: events.length > 0 ? events[0].date : undefined,
-    changesByParameter,
-  };
-};
+const mongoDocToTCPDataEntry = (doc: any): TCPDataEntry => ({
+  index: doc.eventIndex,
+  date: doc.eventDate ? doc.eventDate.toISOString() : "",
+  event: doc.event || "",
+  fileName: doc.fileName || "",
+  elementNumber: doc.elementNumber || "",
+  elementValue: doc.elementValue || "",
+  parsedElement: doc.parsedElement || {},
+  rawEntry: doc.rawEntry || "",
+  controllerId: doc.controllerId,
+  controllerName: doc.controllerName,
+});
 
 export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
@@ -177,7 +25,6 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   }
 
   try {
-
     if (controllerId === "all") {
       return await handleAllControllersTCP(req, res);
     }
@@ -190,49 +37,14 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
     }
 
     const controller = controllerResult.rows[0];
-    const ipAddress = controller.ip_address;
-    const controllerName = controller.name;
 
-    const fileName = "LOGDATA.DAT";
-    const folderName = `${ipAddress}_LOGDATA`;
+    const docs = await TCPEventModel.find({ controllerId })
+      .sort({ eventDate: -1 })
+      .lean();
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const filePath = path.join(baseDir, folderName, fileName);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(400).json({
-        success: false,
-        error: "Log file not found. Please fetch log data first.",
-        events: [],
-        comparisons: [],
-        statistics: null,
-      });
-    }
-
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    const stats = fs.statSync(filePath);
-
-    const logEntries = parseLogContent(fileContent);
-    const tcpEvents = extractTCPDataEvents(logEntries, controllerId, controllerName);
-    const comparisons = compareValues(tcpEvents);
-    const statistics = calculateStatistics(tcpEvents);
-
-
-    let savedToDb = false;
-    let newEventsCount = 0;
-    try {
-      const saveResult = await saveTCPEvents({
-        controllerId,
-        events: tcpEvents as ServiceTCPEvent[],
-        fileModifiedAt: stats.mtime,
-      });
-      savedToDb = true;
-      newEventsCount = saveResult.newEventsCount;
-
-    } catch (dbError) {
-      console.error("Error saving TCP events to DB:", dbError);
-    }
+    const tcpEvents: TCPDataEntry[] = docs.map(mongoDocToTCPDataEntry);
+    const comparisons = compareTCPValues(tcpEvents);
+    const statistics = calculateTCPStatistics(tcpEvents);
 
     const response: TCPLogsResponse = {
       success: true,
@@ -240,10 +52,9 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
       comparisons,
       statistics,
       controllerId,
-      controllerName,
-      lastModified: stats.mtime.toISOString(),
-      savedToDb,
-      newEventsCount,
+      controllerName: controller.name,
+      savedToDb: true,
+      newEventsCount: 0,
     };
 
     return res.status(200).json(response);
@@ -259,83 +70,21 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
   }
 };
 
-
 const handleAllControllersTCP = async (req: Request, res: Response) => {
   try {
-    const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
-    const controllersResult = await dbPool.query(controllersQuery);
+    const docs = await TCPEventModel.find({})
+      .sort({ eventDate: -1 })
+      .lean();
 
-    if (controllersResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: "No controllers found in the system",
-        events: [],
-        comparisons: [],
-        statistics: null,
-      });
-    }
-
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const fileName = "LOGDATA.DAT";
-    let allTCPEvents: TCPDataEntry[] = [];
-    let lastModifiedDate: Date | null = null;
-    let processedCount = 0;
-
-    for (const controller of controllersResult.rows) {
-      const folderName = `${controller.ip_address}_LOGDATA`;
-      const filePath = path.join(baseDir, folderName, fileName);
-
-      if (fs.existsSync(filePath)) {
-        try {
-          const fileContent = fs.readFileSync(filePath, "utf-8");
-          const stats = fs.statSync(filePath);
-
-          if (!lastModifiedDate || stats.mtime > lastModifiedDate) {
-            lastModifiedDate = stats.mtime;
-          }
-
-          const logEntries = parseLogContent(fileContent);
-          const tcpEvents = extractTCPDataEvents(logEntries, controller.id, controller.name);
-          allTCPEvents = allTCPEvents.concat(tcpEvents);
-          processedCount++;
-
-
-          try {
-            const saveResult = await saveTCPEvents({
-              controllerId: controller.id,
-              events: tcpEvents as ServiceTCPEvent[],
-              fileModifiedAt: stats.mtime,
-            });
-
-          } catch (dbError) {
-            console.error(`Error saving TCP events to DB for ${controller.name}:`, dbError);
-          }
-        } catch (error) {
-          console.error(`Error reading log for controller ${controller.name}:`, error);
-        }
-      }
-    }
-
-
-    allTCPEvents.sort((a, b) => {
-      if (a.date && b.date) {
-        const dateA = new Date(a.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
-        const dateB = new Date(b.date.replace(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})/, "$1-$2-$3T$4:$5:$6"));
-        return dateB.getTime() - dateA.getTime();
-      }
-      return b.index - a.index;
-    });
-
-    const comparisons = compareValues(allTCPEvents);
-    const statistics = calculateStatistics(allTCPEvents);
+    const allTCPEvents: TCPDataEntry[] = docs.map(mongoDocToTCPDataEntry);
+    const comparisons = compareTCPValues(allTCPEvents);
+    const statistics = calculateTCPStatistics(allTCPEvents);
 
     const response: TCPLogsResponse = {
       success: true,
       events: allTCPEvents,
       comparisons,
       statistics,
-      lastModified: lastModifiedDate?.toISOString() || new Date().toISOString(),
     };
 
     return res.status(200).json(response);
@@ -351,7 +100,6 @@ const handleAllControllersTCP = async (req: Request, res: Response) => {
   }
 };
 
-
 export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, toolNumber, limit, offset } = req.query;
@@ -361,20 +109,36 @@ export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await getTCPEventsFromDB(controllerId, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      toolNumber: toolNumber ? parseInt(toolNumber as string, 10) : undefined,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
-    });
+    const filter: any = { controllerId };
+
+    if (startDate || endDate) {
+      filter.eventDate = {};
+      if (startDate) filter.eventDate.$gte = new Date(startDate as string);
+      if (endDate) filter.eventDate.$lte = new Date(endDate as string);
+    }
+
+    if (toolNumber) {
+      filter["parsedElement.actualToolNumber"] = parseInt(toolNumber as string, 10);
+    }
+
+    const limitNum = limit ? parseInt(limit as string, 10) : 100;
+    const offsetNum = offset ? parseInt(offset as string, 10) : 0;
+
+    const [events, total] = await Promise.all([
+      TCPEventModel.find(filter)
+        .sort({ eventIndex: -1 })
+        .skip(offsetNum)
+        .limit(limitNum)
+        .lean(),
+      TCPEventModel.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
-      events: result.events,
-      total: result.total,
-      limit: limit ? parseInt(limit as string, 10) : 100,
-      offset: offset ? parseInt(offset as string, 10) : 0,
+      events: events.map(mongoDocToTCPDataEntry),
+      total,
+      limit: limitNum,
+      offset: offsetNum,
     });
   } catch (error) {
     console.error("Error fetching TCP events from DB:", error);
@@ -385,7 +149,6 @@ export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
   }
 };
 
-
 export const getTcpHistory = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, groupBy } = req.query;
@@ -395,11 +158,44 @@ export const getTcpHistory = async (req: Request, res: Response) => {
   }
 
   try {
-    const stats = await getDailyTCPStatisticsFromDB(controllerId, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      groupBy: groupBy as "day" | "week" | "month",
-    });
+    const matchStage: any = { controllerId };
+
+    if (startDate || endDate) {
+      matchStage.eventDate = {};
+      if (startDate) matchStage.eventDate.$gte = new Date(startDate as string);
+      if (endDate) matchStage.eventDate.$lte = new Date(endDate as string);
+    }
+
+    let dateGroupFormat: string;
+    switch (groupBy) {
+      case "week":
+        dateGroupFormat = "%Y-W%V";
+        break;
+      case "month":
+        dateGroupFormat = "%Y-%m";
+        break;
+      default:
+        dateGroupFormat = "%Y-%m-%d";
+    }
+
+    const stats = await TCPEventModel.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: { $dateToString: { format: dateGroupFormat, date: "$eventDate" } },
+          total_events: { $sum: 1 },
+          tools_modified: { $addToSet: "$parsedElement.actualToolNumber" },
+        },
+      },
+      {
+        $project: {
+          stat_date: "$_id",
+          total_events: 1,
+          tools_modified: { $size: "$tools_modified" },
+        },
+      },
+      { $sort: { stat_date: -1 } },
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -414,10 +210,29 @@ export const getTcpHistory = async (req: Request, res: Response) => {
   }
 };
 
-
 export const getAllControllersTcpSummaryEndpoint = async (req: Request, res: Response) => {
   try {
-    const summary = await getAllControllersTCPSummary();
+    const summary = await TCPEventModel.aggregate([
+      {
+        $group: {
+          _id: "$controllerId",
+          controllerName: { $first: "$controllerName" },
+          total_events: { $sum: 1 },
+          last_tcp_date: { $max: "$eventDate" },
+          tools_modified: { $addToSet: "$parsedElement.actualToolNumber" },
+        },
+      },
+      {
+        $project: {
+          controller_id: "$_id",
+          controller_name: "$controllerName",
+          total_events: 1,
+          last_tcp_date: 1,
+          tools_modified: { $size: "$tools_modified" },
+        },
+      },
+      { $sort: { last_tcp_date: -1 } },
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -432,7 +247,6 @@ export const getAllControllersTcpSummaryEndpoint = async (req: Request, res: Res
   }
 };
 
-
 export const checkTcpData = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -441,11 +255,11 @@ export const checkTcpData = async (req: Request, res: Response) => {
   }
 
   try {
-    const hasData = await hasTCPData(controllerId);
+    const hasData = await TCPEventModel.exists({ controllerId });
 
     return res.status(200).json({
       success: true,
-      hasData,
+      hasData: !!hasData,
     });
   } catch (error) {
     console.error("Error checking TCP data:", error);

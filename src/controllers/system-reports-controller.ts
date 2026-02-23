@@ -1,83 +1,60 @@
 import { Request, Response } from "express";
-import { collectAlarmReportData } from "../utils/collectors/alarm-report-collector.js";
-import { collectOperatingRateReportData } from "../utils/collectors/operating-rate-collector.js";
-import { collectUtilizationReportData } from "../utils/collectors/utilization-report-collector.js";
-import { collectSystemHealthData } from "../utils/collectors/system-health-collector.js";
+import { collectSection, getAvailableSections } from "../utils/reports/section-collectors.js";
+import { renderDynamicPDF } from "../utils/reports/dynamic-pdf-renderer.js";
 
-const getAlarmReport = async (req: Request, res: Response) => {
+const generateReport = async (req: Request, res: Response) => {
   try {
-    const { controllerIds, timeRange = "7d", shiftId } = req.query;
+    const { sections, controllerIds, timeRange = "7d", title } = req.body;
 
-    const parsedControllerIds = controllerIds ? (controllerIds as string).split(",") : undefined;
+    if (!sections || !Array.isArray(sections) || sections.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "sections array is required",
+        availableSections: getAvailableSections(),
+      });
+    }
 
-    const data = await collectAlarmReportData(parsedControllerIds, timeRange as "24h" | "7d" | "shift", shiftId as string);
+    const parsedControllerIds = controllerIds && Array.isArray(controllerIds) ? controllerIds : undefined;
 
-    return res.json(data);
+    const collectedSections = await Promise.all(
+      sections.map((key: string) => collectSection(key, parsedControllerIds, timeRange)),
+    );
+
+    const validSections = collectedSections.filter((s) => s !== null);
+
+    if (validSections.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "No valid sections found",
+        availableSections: getAvailableSections(),
+      });
+    }
+
+    const pdfBuffer = renderDynamicPDF(title || "System Report", validSections);
+
+    const fileName = `system_report_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.byteLength);
+
+    return res.send(Buffer.from(pdfBuffer));
   } catch (error: any) {
-    console.error("Error generating alarm report:", error);
+    console.error("Error generating report:", error);
     return res.status(500).json({
       success: false,
-      error: "Failed to generate alarm report",
+      error: "Failed to generate report",
       details: error.message,
     });
   }
 };
 
-const getUtilizationReport = async (req: Request, res: Response) => {
-  try {
-    const { controllerIds, timeRange = "7d", shiftId } = req.query;
-
-    const parsedControllerIds = controllerIds ? (controllerIds as string).split(",") : undefined;
-
-    const data = await collectUtilizationReportData(parsedControllerIds, timeRange as "24h" | "7d" | "shift", shiftId as string);
-
-    return res.json(data);
-  } catch (error: any) {
-    console.error("Error generating utilization report:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to generate utilization report",
-      details: error.message,
-    });
-  }
+const getAvailableReportSections = async (_req: Request, res: Response) => {
+  const available = getAvailableSections();
+  return res.json({
+    success: true,
+    sections: available,
+  });
 };
 
-const getOperatingRateReport = async (req: Request, res: Response) => {
-  try {
-    const { controllerIds, timeRange = "7d", shiftId } = req.query;
-
-    const parsedControllerIds = controllerIds ? (controllerIds as string).split(",") : undefined;
-
-    const data = await collectOperatingRateReportData(parsedControllerIds, timeRange as "24h" | "7d" | "shift", shiftId as string);
-
-    return res.json(data);
-  } catch (error: any) {
-    console.error("Error generating operating rate report:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to generate operating rate report",
-      details: error.message,
-    });
-  }
-};
-
-const getSystemHealthReport = async (req: Request, res: Response) => {
-  try {
-    const { controllerIds, timeRange = "7d", shiftId } = req.query;
-
-    const parsedControllerIds = controllerIds ? (controllerIds as string).split(",") : undefined;
-
-    const data = await collectSystemHealthData(parsedControllerIds, timeRange as "24h" | "7d" | "shift", shiftId as string);
-
-    return res.json(data);
-  } catch (error: any) {
-    console.error("Error generating system health report:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to generate system health report",
-      details: error.message,
-    });
-  }
-};
-
-export { getAlarmReport, getUtilizationReport, getOperatingRateReport, getSystemHealthReport };
+export { generateReport, getAvailableReportSections };
