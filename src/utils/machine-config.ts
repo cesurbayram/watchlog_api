@@ -8,7 +8,7 @@ export interface MachineRegisterMapping {
     setCurrent?: number[];
     actualVoltage?: number[];
     actualCurrent?: number[];
-    wireSpeed?: number[];
+    actualWireSpeed?: number[];
     motorTorqueM1?: number[];
     motorTorqueM2?: number[];
     actualGasFlow?: number[];
@@ -31,7 +31,7 @@ export const MACHINE_CONFIGURATIONS: MachineRegisterMapping[] = [
     registers: {
       actualVoltage: [152],
       actualCurrent: [153],
-      wireSpeed: [151],
+      actualWireSpeed: [151],
     },
   },
   {
