@@ -6,6 +6,8 @@ export interface UserResponseDto {
   email: string;
   role: string;
   bcryptPassword: string;
+  roleId?: string;
+  roleName?: string;
 }
 
 export interface UserRequestDto {
@@ -16,4 +18,5 @@ export interface UserRequestDto {
   email: string;
   role: string;
   password: string;
+  controllerIds: string[];
 }

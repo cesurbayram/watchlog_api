@@ -7,7 +7,7 @@ import bcrypt from "bcrypt";
 const saltRounds = 10;
 
 const createUser = async (req: Request, res: Response) => {
-  const { name, lastName, userName, email, role, password }: UserRequestDto = req.body;
+  const { name, lastName, userName, email, role, password, controllerIds }: UserRequestDto = req.body;
   const newUserId = uuidv4();
   const client = await dbPool.connect();
 
@@ -23,10 +23,20 @@ const createUser = async (req: Request, res: Response) => {
     const bcryptPassword = password && (await bcrypt.hash(password, saltRounds));
 
     await client.query(
-      `INSERT INTO "users" (id, name, last_name, user_name, email, role, bcrypt_password) 
+      `INSERT INTO "users" (id, name, last_name, user_name, email, role_id, bcrypt_password) 
             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [newUserId, name, lastName, userName, email, role, bcryptPassword],
     );
+
+    for (const item of controllerIds) {
+      const newUserControllerPermissionId = uuidv4();
+      await client.query(
+        `INSERT INTO controller_user_permission (id, user_id, controller_id) 
+              VALUES ($1, $2, $3)`,
+        [newUserControllerPermissionId, newUserId, item],
+      );
+    }
+
     await client.query("COMMIT");
     return res.status(201).json({ message: "User created successfully" });
   } catch (error: any) {
@@ -40,17 +50,29 @@ const createUser = async (req: Request, res: Response) => {
 
 const updateUser = async (req: Request, res: Response) => {
   const userId = req.params?.id;
-  const { name, lastName, userName, email, role }: UserRequestDto = req.body;
+  const { name, lastName, userName, email, role, controllerIds }: UserRequestDto = req.body;
   const client = await dbPool.connect();
 
   try {
     await client.query("BEGIN");
+
     await client.query(
       `UPDATE "users" 
-                SET name = $1, last_name = $2, email = $3, role = $4, user_name = $5, updated_at = now() 
+                SET name = $1, last_name = $2, email = $3, role_id = $4, user_name = $5, updated_at = now() 
                 WHERE id = $6`,
       [name, lastName, email, role, userName, userId],
     );
+    await client.query(`DELETE FROM controller_user_permission WHERE user_id = $1`, [userId]);
+
+    for (const item of controllerIds) {
+      const newUserControllerPermissionId = uuidv4();
+      await client.query(
+        `INSERT INTO controller_user_permission (id, user_id, controller_id) 
+              VALUES ($1, $2, $3)`,
+        [newUserControllerPermissionId, userId, item],
+      );
+    }
+
     await client.query("COMMIT");
     return res.status(200).json({ message: "User updated successfully" });
   } catch (error: any) {
@@ -90,9 +112,11 @@ const getUserById = async (req: Request, res: Response) => {
                 u.last_name AS "lastName",
                 u.user_name AS "userName",
                 u.email,
-                u.role                                 
+                u.role_id,
+                COALESCE(JSON_AGG(cu.controller_id) FILTER (WHERE cu.controller_id IS NOT NULL), '[]') AS "controllerIds"                                 
             FROM users u
-            WHERE u.id = $1`,
+            LEFT JOIN controller_user_permission cu ON u.id = cu.user_id
+            WHERE u.id = $1 GROUP BY u.id`,
       [userId],
     );
 
@@ -118,9 +142,9 @@ const getUsers = async (req: Request, res: Response) => {
             u.last_name AS "lastName", 
             u.user_name AS "userName", 
             u.email, 
-            u.role
+            r.name as role
         FROM 
-            "users" u
+            "users" u LEFT JOIN role r ON u.role_id = r.id
         ORDER BY u.created_at DESC`);
 
     const usersData = userDbRes.rows;

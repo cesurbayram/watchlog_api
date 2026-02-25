@@ -19,7 +19,17 @@ const getRoleById = async (req: Request, res: Response) => {
   const roleId = req.params?.id;
 
   try {
-    const roleDbRes = await dbPool.query(`SELECT * FROM role WHERE id = $1`, [roleId]);
+    const roleDbRes = await dbPool.query(
+      `SELECT
+            r.id,
+            r.name,
+            JSON_AGG(rp.page_id) AS "selectedPages"
+        FROM role r
+                LEFT JOIN role_permission rp ON r.id = rp.role_id
+        WHERE r.id = $1
+        GROUP BY r.id, r.name;`,
+      [roleId],
+    );
     const roleData = roleDbRes.rows[0];
     return res.status(200).json(roleData);
   } catch (error) {
@@ -29,39 +39,72 @@ const getRoleById = async (req: Request, res: Response) => {
 };
 
 const createRole = async (req: Request, res: Response) => {
-  const { name } = req.body;
+  const { name, selectedPages }: { name: string; selectedPages: string[] } = req.body;
   const newRoleId = uuidv4();
 
+  const client = await dbPool.connect();
   try {
-    await dbPool.query(
+    await client.query(
       `
             INSERT INTO role (id, name)
                 VALUES ($1, $2)    
         `,
       [newRoleId, name],
     );
+
+    await client.query(
+      `
+        INSERT INTO role_permission (id, role_id, page_id)
+        SELECT gen_random_uuid(), $1, unnest($2::uuid[])    
+    `,
+      [newRoleId, selectedPages],
+    );
+
     return res.status(201).json({ message: "Role created successfully" });
   } catch (error: any) {
+    await client.query("ROLLBACK");
     console.error("DB ERROR: ", error?.message);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    client.release();
   }
 };
 
 const updateRole = async (req: Request, res: Response) => {
   const roleId = req.params?.id;
-  const { name } = req.body;
+  const { name, selectedPages }: { name: string; selectedPages: string[] } = req.body;
+
+  const client = await dbPool.connect();
 
   try {
-    await dbPool.query(
+    await client.query(
+      `
+        DELETE FROM role_permission WHERE role_id = $1    
+    `,
+      [roleId],
+    );
+
+    await client.query(
       `
             UPDATE role SET name=$1 WHERE id=$2     
         `,
       [name, roleId],
     );
+
+    await client.query(
+      `
+          INSERT INTO role_permission (id, role_id, page_id)
+          SELECT gen_random_uuid(), $1, unnest($2::uuid[])    
+      `,
+      [roleId, selectedPages],
+    );
     return res.status(200).json({ message: "Role updated successfully" });
   } catch (error: any) {
+    await client.query("ROLLBACK");
     console.error("DB ERROR: ", error?.message);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    client.release();
   }
 };
 

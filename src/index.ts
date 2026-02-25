@@ -37,6 +37,7 @@ import teachingLogsRoutes from "./routes/teaching-logs.js";
 import absoLogsRoutes from "./routes/abso-logs.js";
 import roleRoutes from "./routes/role.js";
 import machineConfigRoutes from "./routes/machine-config.js";
+import pageRoutes from "./routes/page.js";
 
 const app = express();
 const port = process.env.PORT ?? "3001";
@@ -84,6 +85,7 @@ app.use("/api-v2/teaching-logs", teachingLogsRoutes);
 app.use("/api-v2/abso-logs", absoLogsRoutes);
 app.use("/api-v2/settings", companySettingsRoutes);
 app.use("/api-v2/role", roleRoutes);
+app.use("/api-v2/page", pageRoutes);
 app.use("/api-v2/machine-config", machineConfigRoutes);
 
 io.on("connection", (socket) => {
