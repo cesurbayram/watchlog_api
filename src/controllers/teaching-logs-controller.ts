@@ -1,131 +1,20 @@
 import { Request, Response } from "express";
+import TeachingEventModel from "../models/mongo/teaching-event.model";
+import { calculateTeachingStatistics } from "../services/teaching-parser.service";
+import { TeachingEvent, TeachingLogsResponse } from "../models/teaching-event-dto";
 import { dbPool } from "../config/db";
-import path from "path";
-import os from "os";
-import fs from "fs";
-import { LogEntry } from "../models/log-content";
-import { parseLogContent } from "../utils/cmos-backup";
-import {
-  saveTeachingEvents,
-  getTeachingEventsFromDB,
-  getDailyStatisticsFromDB,
-  getAllControllersSummary,
-  getUniqueFileNames,
-  hasTeachingData,
-} from "../services/teaching-event-service";
-import { TeachingEvent as ServiceTeachingEvent } from "../models/teaching-event-dto";
-import { TeachingEvent, TeachingStatistics, TeachingLogsResponse } from "../models/teaching-event-dto";
 
-const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: string, controllerName?: string): TeachingEvent[] => {
-  const events: TeachingEvent[] = [];
-
-  logEntries.forEach((entry) => {
-    const event = entry.event?.toLowerCase() || "";
-
-    if (event.includes("job edit(p. mod)")) {
-      events.push({
-        index: entry.index,
-        date: entry.date || "",
-        type: "POINT_MODIFICATION",
-        fileName: entry.fields["FILE NAME"],
-        lineNumber: entry.fields["LINE"],
-        details: `Point modified in ${entry.fields["FILE NAME"]} at line ${entry.fields["LINE"]}`,
-        rawEntry: entry.rawData,
-        controllerId,
-        controllerName,
-      });
-    } else if (event.includes("job edit(ins)")) {
-      events.push({
-        index: entry.index,
-        date: entry.date || "",
-        type: "INSTRUCTION_INSERT",
-        fileName: entry.fields["FILE NAME"],
-        lineNumber: entry.fields["LINE"],
-        details: `Instruction inserted: ${entry.fields["AFTER EDIT"] || "Unknown"}`,
-        rawEntry: entry.rawData,
-        controllerId,
-        controllerName,
-      });
-    } else if (event.includes("job edit(del)")) {
-      events.push({
-        index: entry.index,
-        date: entry.date || "",
-        type: "INSTRUCTION_DELETE",
-        fileName: entry.fields["FILE NAME"],
-        lineNumber: entry.fields["LINE"],
-        details: `Instruction deleted: ${entry.fields["DELETED LINE"] || "Unknown"}`,
-        rawEntry: entry.rawData,
-        controllerId,
-        controllerName,
-      });
-    } else if (event.includes("teach mode")) {
-      events.push({
-        index: entry.index,
-        date: entry.date || "",
-        type: "TEACH_MODE",
-        details: "Robot entered teach mode",
-        rawEntry: entry.rawData,
-        controllerId,
-        controllerName,
-      });
-    }
-  });
-
-  return events.sort((a, b) => a.index - b.index);
-};
-
-const calculateStatistics = (events: TeachingEvent[]): TeachingStatistics => {
-  const fileModifications: {
-    [key: string]: {
-      count: number;
-      lastDate: string;
-      lastEvent: TeachingEvent;
-    };
-  } = {};
-
-  events.forEach((event) => {
-    if (event.fileName) {
-      if (!fileModifications[event.fileName]) {
-        fileModifications[event.fileName] = {
-          count: 0,
-          lastDate: event.date,
-          lastEvent: event,
-        };
-      }
-      fileModifications[event.fileName].count += 1;
-
-      if (event.index < fileModifications[event.fileName].lastEvent.index) {
-        fileModifications[event.fileName].lastDate = event.date;
-        fileModifications[event.fileName].lastEvent = event;
-      }
-    }
-  });
-
-  const mostModifiedFiles = Object.entries(fileModifications)
-    .map(([fileName, data]) => ({
-      fileName,
-      count: data.count,
-      lastTeachingDate: data.lastDate,
-      lastEvent: data.lastEvent,
-    }))
-    .sort((a, b) => {
-      const dateComparison = new Date(b.lastTeachingDate).getTime() - new Date(a.lastTeachingDate).getTime();
-      if (dateComparison !== 0) return dateComparison;
-      return b.count - a.count;
-    })
-    .slice(0, 5);
-
-  return {
-    totalTeachingEvents: events.length,
-    pointModifications: events.filter((e) => e.type === "POINT_MODIFICATION").length,
-    instructionInserts: events.filter((e) => e.type === "INSTRUCTION_INSERT").length,
-    instructionDeletes: events.filter((e) => e.type === "INSTRUCTION_DELETE").length,
-    teachModeActivations: events.filter((e) => e.type === "TEACH_MODE").length,
-    lastTeachingDate: events.length > 0 ? events[0].date : undefined,
-    mostModifiedFiles,
-  };
-};
-
+const mongoDocToTeachingEvent = (doc: any): TeachingEvent => ({
+  index: doc.eventIndex,
+  date: doc.eventDate ? doc.eventDate.toISOString() : "",
+  type: doc.eventType,
+  fileName: doc.fileName,
+  lineNumber: doc.lineNumber,
+  details: doc.details || "",
+  rawEntry: doc.rawEntry || "",
+  controllerId: doc.controllerId,
+  controllerName: doc.controllerName,
+});
 
 export const getTeachingLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
@@ -135,7 +24,6 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
   }
 
   try {
-
     if (controllerId === "all") {
       return await handleAllControllersTeaching(req, res);
     }
@@ -148,56 +36,22 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
     }
 
     const controller = controllerResult.rows[0];
-    const ipAddress = controller.ip_address;
-    const controllerName = controller.name;
 
-    const fileName = "LOGDATA.DAT";
-    const folderName = `${ipAddress}_LOGDATA`;
+    const docs = await TeachingEventModel.find({ controllerId })
+      .sort({ eventIndex: 1 })
+      .lean();
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const filePath = path.join(baseDir, folderName, fileName);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(400).json({
-        success: false,
-        error: "Log file not found. Please fetch log data first.",
-        events: [],
-        statistics: null,
-      });
-    }
-
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    const stats = fs.statSync(filePath);
-
-    const logEntries = parseLogContent(fileContent);
-    const teachingEvents = extractTeachingEvents(logEntries, controllerId, controllerName);
-    const statistics = calculateStatistics(teachingEvents);
-
-    let savedToDb = false;
-    let newEventsCount = 0;
-    try {
-      const saveResult = await saveTeachingEvents({
-        controllerId,
-        events: teachingEvents as ServiceTeachingEvent[],
-        fileModifiedAt: stats.mtime,
-      });
-      savedToDb = true;
-      newEventsCount = saveResult.newEventsCount;
-
-    } catch (dbError) {
-      console.error("Error saving teaching events to DB:", dbError);
-    }
+    const teachingEvents: TeachingEvent[] = docs.map(mongoDocToTeachingEvent);
+    const statistics = calculateTeachingStatistics(teachingEvents);
 
     const response: TeachingLogsResponse = {
       success: true,
       events: teachingEvents,
       statistics,
       controllerId,
-      controllerName,
-      lastModified: stats.mtime.toISOString(),
-      savedToDb,
-      newEventsCount,
+      controllerName: controller.name,
+      savedToDb: true,
+      newEventsCount: 0,
     };
 
     return res.status(200).json(response);
@@ -212,73 +66,21 @@ export const getTeachingLogsByControllerId = async (req: Request, res: Response)
   }
 };
 
-
 const handleAllControllersTeaching = async (req: Request, res: Response) => {
   try {
-    const controllersQuery = `SELECT id, ip_address, name FROM controller ORDER BY name`;
-    const controllersResult = await dbPool.query(controllersQuery);
+    const docs = await TeachingEventModel.find({})
+      .sort({ eventIndex: 1 })
+      .lean();
 
-    if (controllersResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: "No controllers found in the system",
-        events: [],
-        statistics: null,
-      });
-    }
-
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const fileName = "LOGDATA.DAT";
-    let allTeachingEvents: TeachingEvent[] = [];
-    let lastModifiedDate: Date | null = null;
-    let totalNewEvents = 0;
-
-    for (const controller of controllersResult.rows) {
-      const folderName = `${controller.ip_address}_LOGDATA`;
-      const filePath = path.join(baseDir, folderName, fileName);
-
-      if (fs.existsSync(filePath)) {
-        try {
-          const fileContent = fs.readFileSync(filePath, "utf-8");
-          const stats = fs.statSync(filePath);
-
-          if (!lastModifiedDate || stats.mtime > lastModifiedDate) {
-            lastModifiedDate = stats.mtime;
-          }
-
-          const logEntries = parseLogContent(fileContent);
-          const teachingEvents = extractTeachingEvents(logEntries, controller.id, controller.name);
-          allTeachingEvents = allTeachingEvents.concat(teachingEvents);
-
-
-          try {
-            const saveResult = await saveTeachingEvents({
-              controllerId: controller.id,
-              events: teachingEvents as ServiceTeachingEvent[],
-              fileModifiedAt: stats.mtime,
-            });
-            totalNewEvents += saveResult.newEventsCount;
-          } catch (dbError) {
-            console.error(`Error saving teaching events for ${controller.name}:`, dbError);
-          }
-        } catch (error) {
-          console.error(`Error reading log for controller ${controller.name}:`, error);
-        }
-      }
-    }
-
-    allTeachingEvents.sort((a, b) => a.index - b.index);
-
-    const statistics = calculateStatistics(allTeachingEvents);
+    const allTeachingEvents: TeachingEvent[] = docs.map(mongoDocToTeachingEvent);
+    const statistics = calculateTeachingStatistics(allTeachingEvents);
 
     const response: TeachingLogsResponse = {
       success: true,
       events: allTeachingEvents,
       statistics,
-      lastModified: lastModifiedDate?.toISOString() || new Date().toISOString(),
       savedToDb: true,
-      newEventsCount: totalNewEvents,
+      newEventsCount: 0,
     };
 
     return res.status(200).json(response);
@@ -293,7 +95,6 @@ const handleAllControllersTeaching = async (req: Request, res: Response) => {
   }
 };
 
-
 export const getTeachingEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, eventType, fileName, limit, offset } = req.query;
@@ -303,37 +104,44 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
   }
 
   try {
-
     if (controllerId === "all") {
       return await getAllControllersSummaryEndpoint(req, res);
     }
 
-    const result = await getTeachingEventsFromDB(controllerId, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      eventType: eventType as string,
-      fileName: fileName as string,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
-    });
+    const filter: any = { controllerId };
 
-    const events = result.events.map((e) => ({
-      index: e.event_index,
-      date: e.event_date ? e.event_date.toISOString() : "",
-      type: e.event_type,
-      fileName: e.file_name,
-      lineNumber: e.line_number,
-      details: e.details,
-      rawEntry: e.raw_entry,
-      controllerId: e.controller_id,
-    }));
+    if (startDate || endDate) {
+      filter.eventDate = {};
+      if (startDate) filter.eventDate.$gte = new Date(startDate as string);
+      if (endDate) filter.eventDate.$lte = new Date(endDate as string);
+    }
+
+    if (eventType) {
+      filter.eventType = eventType;
+    }
+
+    if (fileName) {
+      filter.fileName = fileName;
+    }
+
+    const limitNum = limit ? parseInt(limit as string, 10) : 100;
+    const offsetNum = offset ? parseInt(offset as string, 10) : 0;
+
+    const [events, total] = await Promise.all([
+      TeachingEventModel.find(filter)
+        .sort({ eventIndex: -1 })
+        .skip(offsetNum)
+        .limit(limitNum)
+        .lean(),
+      TeachingEventModel.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
-      events,
-      total: result.total,
-      limit: limit ? parseInt(limit as string, 10) : 100,
-      offset: offset ? parseInt(offset as string, 10) : 0,
+      events: events.map(mongoDocToTeachingEvent),
+      total,
+      limit: limitNum,
+      offset: offsetNum,
     });
   } catch (error) {
     console.error("Error getting teaching events from DB:", error);
@@ -344,7 +152,6 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
   }
 };
 
-
 export const getTeachingHistory = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
   const { startDate, endDate, groupBy } = req.query;
@@ -354,11 +161,58 @@ export const getTeachingHistory = async (req: Request, res: Response) => {
   }
 
   try {
-    const stats = await getDailyStatisticsFromDB(controllerId, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      groupBy: (groupBy as "day" | "week" | "month") || "day",
-    });
+    const matchStage: any = { controllerId };
+
+    if (startDate || endDate) {
+      matchStage.eventDate = {};
+      if (startDate) matchStage.eventDate.$gte = new Date(startDate as string);
+      if (endDate) matchStage.eventDate.$lte = new Date(endDate as string);
+    }
+
+    let dateGroupFormat: string;
+    switch (groupBy) {
+      case "week":
+        dateGroupFormat = "%Y-W%V";
+        break;
+      case "month":
+        dateGroupFormat = "%Y-%m";
+        break;
+      default:
+        dateGroupFormat = "%Y-%m-%d";
+    }
+
+    const stats = await TeachingEventModel.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: { $dateToString: { format: dateGroupFormat, date: "$eventDate" } },
+          point_modifications: {
+            $sum: { $cond: [{ $eq: ["$eventType", "POINT_MODIFICATION"] }, 1, 0] },
+          },
+          instruction_inserts: {
+            $sum: { $cond: [{ $eq: ["$eventType", "INSTRUCTION_INSERT"] }, 1, 0] },
+          },
+          instruction_deletes: {
+            $sum: { $cond: [{ $eq: ["$eventType", "INSTRUCTION_DELETE"] }, 1, 0] },
+          },
+          teach_mode_activations: {
+            $sum: { $cond: [{ $eq: ["$eventType", "TEACH_MODE"] }, 1, 0] },
+          },
+          total_events: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          stat_date: "$_id",
+          point_modifications: 1,
+          instruction_inserts: 1,
+          instruction_deletes: 1,
+          teach_mode_activations: 1,
+          total_events: 1,
+        },
+      },
+      { $sort: { stat_date: -1 } },
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -375,10 +229,43 @@ export const getTeachingHistory = async (req: Request, res: Response) => {
   }
 };
 
-
 export const getAllControllersSummaryEndpoint = async (req: Request, res: Response) => {
   try {
-    const summary = await getAllControllersSummary();
+    const summary = await TeachingEventModel.aggregate([
+      {
+        $group: {
+          _id: "$controllerId",
+          controllerName: { $first: "$controllerName" },
+          total_events: { $sum: 1 },
+          last_teaching_date: { $max: "$eventDate" },
+          point_modifications: {
+            $sum: { $cond: [{ $eq: ["$eventType", "POINT_MODIFICATION"] }, 1, 0] },
+          },
+          instruction_inserts: {
+            $sum: { $cond: [{ $eq: ["$eventType", "INSTRUCTION_INSERT"] }, 1, 0] },
+          },
+          instruction_deletes: {
+            $sum: { $cond: [{ $eq: ["$eventType", "INSTRUCTION_DELETE"] }, 1, 0] },
+          },
+          teach_mode_activations: {
+            $sum: { $cond: [{ $eq: ["$eventType", "TEACH_MODE"] }, 1, 0] },
+          },
+        },
+      },
+      {
+        $project: {
+          controller_id: "$_id",
+          controller_name: "$controllerName",
+          total_events: 1,
+          last_teaching_date: 1,
+          point_modifications: 1,
+          instruction_inserts: 1,
+          instruction_deletes: 1,
+          teach_mode_activations: 1,
+        },
+      },
+      { $sort: { last_teaching_date: -1 } },
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -394,7 +281,6 @@ export const getAllControllersSummaryEndpoint = async (req: Request, res: Respon
   }
 };
 
-
 export const getTeachingFileNames = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -403,11 +289,14 @@ export const getTeachingFileNames = async (req: Request, res: Response) => {
   }
 
   try {
-    const fileNames = await getUniqueFileNames(controllerId);
+    const fileNames = await TeachingEventModel.distinct("fileName", {
+      controllerId,
+      fileName: { $ne: null },
+    });
 
     return res.status(200).json({
       success: true,
-      fileNames,
+      fileNames: fileNames.sort(),
     });
   } catch (error) {
     console.error("Error getting file names:", error);
@@ -418,7 +307,6 @@ export const getTeachingFileNames = async (req: Request, res: Response) => {
   }
 };
 
-
 export const checkTeachingData = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -427,11 +315,11 @@ export const checkTeachingData = async (req: Request, res: Response) => {
   }
 
   try {
-    const hasData = await hasTeachingData(controllerId);
+    const hasData = await TeachingEventModel.exists({ controllerId });
 
     return res.status(200).json({
       success: true,
-      hasData,
+      hasData: !!hasData,
       controllerId,
     });
   } catch (error) {

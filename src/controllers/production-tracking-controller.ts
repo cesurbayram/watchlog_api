@@ -397,6 +397,157 @@ const refreshProductionTracking = async (req: Request, res: Response) => {
   }
 };
 
+const getAutoTrackRecords = async (_req: Request, res: Response) => {
+  try {
+    const result = await dbPool.query(`
+      SELECT 
+        pt.id,
+        pt.controller_id,
+        pt.shift_id,
+        pt.job_id,
+        pt.variable_type,
+        pt.variable_no,
+        pt.expected_count,
+        s.shift_start,
+        s.shift_end,
+        s.name as shift_name
+      FROM production_tracking pt
+      JOIN shift s ON pt.shift_id = s.id
+      WHERE pt.auto_track = true
+    `);
+
+    return res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.error("GET auto-track records error:", error);
+    return res.status(500).json({ error: "Failed to fetch auto-track records" });
+  }
+};
+
+const getAutoTrackRecord = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const result = await dbPool.query(
+      `
+      SELECT 
+        pt.id,
+        pt.controller_id,
+        pt.shift_id,
+        pt.job_id,
+        pt.variable_type,
+        pt.variable_no,
+        pt.expected_count,
+        pt.auto_track,
+        s.shift_start,
+        s.shift_end,
+        s.name as shift_name
+      FROM production_tracking pt
+      JOIN shift s ON pt.shift_id = s.id
+      WHERE pt.id = $1
+    `,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Auto-track record not found" });
+    }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (error: any) {
+    console.error("GET auto-track record error:", error);
+    return res.status(500).json({ error: "Failed to fetch auto-track record" });
+  }
+};
+
+const executeAutoTrackUpdate = async (req: Request, res: Response) => {
+  const client = await dbPool.connect();
+
+  try {
+    const { recordId, controllerId, shiftId, jobId, variableType, variableNo, expectedCount, shiftName, type } = req.body;
+
+    if (!recordId || !controllerId || !variableType || !variableNo || !type) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const tableMap: Record<string, string> = {
+      GeneralDouble: "general_double_data",
+      GeneralInt: "general_int_data",
+      GeneralByte: "general_byte_data",
+      GeneralReal: "general_real_data",
+    };
+
+    const tableName = tableMap[variableType];
+    if (!tableName) {
+      return res.status(400).json({ error: `Unknown variable type: ${variableType}` });
+    }
+
+    const valueRes = await client.query(
+      `SELECT value FROM ${tableName} WHERE controller_id = $1 AND general_no = $2`,
+      [controllerId, variableNo],
+    );
+
+    const systemCount = valueRes.rows[0]?.value || 0;
+
+    await client.query("BEGIN");
+
+    if (type === "start") {
+      await client.query(
+        `UPDATE production_tracking 
+         SET shift_start_count = $1, system_count = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [systemCount, recordId],
+      );
+    } else {
+      const trackingRecord = await client.query(
+        `SELECT shift_start_count FROM production_tracking WHERE id = $1`,
+        [recordId],
+      );
+
+      const shiftStartCount = trackingRecord.rows[0]?.shift_start_count || 0;
+      const dailyProduction = systemCount - shiftStartCount;
+
+      const historyId = uuidv4();
+      await client.query(
+        `INSERT INTO production_tracking_history 
+         (id, controller_id, shift_id, job_id, variable_type, variable_no, 
+          shift_start_count, previous_count, current_count, daily_production, expected_count, note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          historyId,
+          controllerId,
+          shiftId,
+          jobId,
+          variableType,
+          variableNo,
+          shiftStartCount,
+          shiftStartCount,
+          systemCount,
+          dailyProduction,
+          expectedCount,
+          `Auto-tracked at shift end (${shiftName})`,
+        ],
+      );
+
+      await client.query(
+        `UPDATE production_tracking 
+         SET system_count = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [systemCount, recordId],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({ success: true, systemCount });
+  } catch (error: any) {
+    await client.query("ROLLBACK");
+    console.error("POST auto-track execute error:", error);
+    return res.status(500).json({ error: "Failed to execute auto-track update" });
+  } finally {
+    client.release();
+  }
+};
+
 export {
   getProductionTracking,
   createProductionTracking,
@@ -405,4 +556,7 @@ export {
   deleteProductionTrackingHistory,
   getProductionTrackingStatistics,
   refreshProductionTracking,
+  getAutoTrackRecords,
+  getAutoTrackRecord,
+  executeAutoTrackUpdate,
 };

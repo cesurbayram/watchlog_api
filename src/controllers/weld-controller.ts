@@ -1,10 +1,8 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
-import fs from "fs";
-import path from "path";
-import { getWeldDirectory, listDateFolders, listHourlyFiles, readWeldSQLite, readAllWeldData } from "../utils/weld-parser";
-import { WeldRawData, WeldPartSummary, WeldSeamSummary, FlatSeamRow, WeldSeamDetail, WeldActualData, WeldFileInfo } from "../models/weld-dto";
-
+import WeldHeaderModel from "../models/mongo/weld-header.model";
+import WeldDetailModel from "../models/mongo/weld-detail.model";
+import { WeldRawData, WeldPartSummary, WeldSeamSummary, FlatSeamRow, WeldSeamDetail, WeldActualData } from "../models/weld-dto";
 
 function parseTimeToMs(time: string): number {
   const parts = time.split(":");
@@ -16,6 +14,82 @@ function parseTimeToMs(time: string): number {
   const ms = parts.length > 3 ? parseInt(parts[3]) || 0 : 0;
 
   return hours * 3600000 + minutes * 60000 + seconds * 1000 + ms;
+}
+
+function safeNumber(val: any): number {
+  if (val === null || val === undefined) return 0;
+  if (!Number.isFinite(val)) return 0;
+  return val;
+}
+
+async function fetchWeldRawData(ipAddress: string, dateFilter?: string): Promise<WeldRawData[]> {
+  const headerFilter: any = { IpAdress: ipAddress };
+
+  if (dateFilter) {
+    const startDate = new Date(dateFilter);
+    const endDate = new Date(dateFilter);
+    endDate.setDate(endDate.getDate() + 1);
+    headerFilter.CreatedAt = { $gte: startDate, $lt: endDate };
+  }
+
+  const headers = await WeldHeaderModel.find(headerFilter).lean();
+
+  if (headers.length === 0) return [];
+
+  const dataParts = headers.map((h) => h._id);
+  const details = await WeldDetailModel.find({ DataPart: { $in: dataParts } })
+    .sort({ DateTime: 1 })
+    .lean();
+
+  const headerMap = new Map(headers.map((h) => [h._id, h]));
+
+  const rawData: WeldRawData[] = details.map((d) => {
+    const h = headerMap.get(d.DataPart);
+    const dt = new Date(d.DateTime);
+    const date = dt.toISOString().split("T")[0];
+    const hours = dt.getUTCHours().toString().padStart(2, "0");
+    const minutes = dt.getUTCMinutes().toString().padStart(2, "0");
+    const seconds = dt.getUTCSeconds().toString().padStart(2, "0");
+    const ms = dt.getUTCMilliseconds().toString().padStart(3, "0");
+    const time = `${hours}:${minutes}:${seconds}:${ms}`;
+
+    return {
+      dataPart: d.DataPart,
+      date,
+      time,
+      factory: h?.Factory || "",
+      line: h?.Line || "",
+      cell: h?.Cell || "",
+      partSerialId: h?.PartSerialID || "",
+      partItemNumber: h?.PartItemNumber || "",
+      jobName: h?.JobName || "",
+      seamNumber: h?.SeamNumber || 0,
+      weldLength: safeNumber(h?.WeldLength),
+      setVoltage: safeNumber(h?.SetVoltage),
+      setCurrent: safeNumber(h?.SetCurrent),
+      averageVoltage: safeNumber(h?.AvarageVoltage),
+      averageCurrent: safeNumber(h?.AvarageCurrent),
+      averageGasFlow: safeNumber(h?.AvarageGasFlow),
+      averageWireSpeed: safeNumber(h?.AvarageWireSpeed),
+      averageMotorTorqueM1: safeNumber(h?.AvarageMotorTorqueM1),
+      averageMotorTorqueM2: safeNumber(h?.AvarageMotorTorqueM2),
+      actualVoltage: safeNumber(d.ActualVoltage),
+      actualCurrent: safeNumber(d.ActualCurrent),
+      actualWireSpeed: safeNumber(d.ActualWireSpeed),
+      torqueM1: safeNumber(d.MotorTorqueM1),
+      torqueM2: safeNumber(d.MotorTorqueM2),
+      actualGasFlow: safeNumber(d.ActualGasFlow),
+      weldDuration: safeNumber(h?.WeldDuration),
+      weldingSpeed: safeNumber(h?.WeldingSpeed),
+      wireConsumption: safeNumber(h?.WireConsumption),
+      machine: h?.MachineName || "",
+      ipAddress: h?.IpAdress || "",
+      toolNo: h?.ToolNo || 0,
+      groupType: h?.GroupType || "",
+    };
+  });
+
+  return rawData;
 }
 
 function createPartSummaries(rawData: WeldRawData[]): WeldPartSummary[] {
@@ -41,7 +115,7 @@ function createPartSummaries(rawData: WeldRawData[]): WeldPartSummary[] {
 
     const seams: WeldSeamSummary[] = [];
     let currentSeamNumber: number | null = null;
-    let currentDataPart: number | null = null;
+    let currentDataPart: string | null = null;
 
     for (const record of sortedRecords) {
       const isNewOperation = currentSeamNumber === null || record.seamNumber !== currentSeamNumber || record.dataPart !== currentDataPart;
@@ -69,7 +143,6 @@ function createPartSummaries(rawData: WeldRawData[]): WeldPartSummary[] {
       cell: first.cell,
       partSerialId: first.partSerialId,
       partItemNumber: first.partItemNumber,
-      partVersion: first.partVersion,
       jobName: first.jobName,
       machine: first.machine,
       date: first.date,
@@ -97,7 +170,6 @@ function createFlatSeamRows(partSummaries: WeldPartSummary[]): FlatSeamRow[] {
           cell: part.cell,
           partSerialId: part.partSerialId,
           partItemNumber: part.partItemNumber,
-          partVersion: part.partVersion,
           jobName: part.jobName,
           machine: part.machine,
           date: part.date,
@@ -133,7 +205,7 @@ function createSeamDetails(rawData: WeldRawData[]): WeldSeamDetail[] {
   const operations: { records: WeldRawData[]; operationIndex: number }[] = [];
   let currentOperation: WeldRawData[] = [];
   let currentSeamNumber: number | null = null;
-  let currentDataPart: number | null = null;
+  let currentDataPart: string | null = null;
   let operationIndex = 0;
 
   for (const data of sortedData) {
@@ -178,7 +250,9 @@ function createSeamDetails(rawData: WeldRawData[]): WeldSeamDetail[] {
       averageVoltage: first.averageVoltage,
       averageCurrent: first.averageCurrent,
       averageGasFlow: first.averageGasFlow,
-      gasConsumption: first.gasConsumption,
+      averageWireSpeed: first.averageWireSpeed,
+      averageMotorTorqueM1: first.averageMotorTorqueM1,
+      averageMotorTorqueM2: first.averageMotorTorqueM2,
       recordCount: op.records.length,
       dataPart: first.dataPart,
       toolNo: first.toolNo,
@@ -191,100 +265,33 @@ function createSeamDetails(rawData: WeldRawData[]): WeldSeamDetail[] {
 const getWeldData = async (req: Request, res: Response) => {
   try {
     const { arcFunctionId } = req.params;
-    const { date: dateFilter, hour: hourFilter, page = "1", limit = "20", search = "" } = req.query;
+    const { date: dateFilter, page = "1", limit = "20", search = "" } = req.query;
 
-    const arcFunctionResult = await dbPool.query(`SELECT ip_address, machine_name, machine_type FROM arc_function WHERE id = $1`, [arcFunctionId]);
+    const arcFunctionResult = await dbPool.query(
+      `SELECT ip_address, machine_name, machine_type FROM arc_function WHERE id = $1`,
+      [arcFunctionId],
+    );
 
     if (arcFunctionResult.rowCount === 0) {
       return res.status(404).json({ message: "Arc Function not found" });
     }
 
-    const { ip_address: ipAddress, machine_name: machineName, machine_type: machineType } = arcFunctionResult.rows[0];
+    const { ip_address: ipAddress, machine_name: machineName } = arcFunctionResult.rows[0];
 
-    const weldDir = getWeldDirectory(ipAddress);
+    const allRawData = await fetchWeldRawData(ipAddress, dateFilter as string | undefined);
 
-    if (!fs.existsSync(weldDir)) {
+    if (allRawData.length === 0) {
       return res.status(200).json({
         arcFunctionId,
         ipAddress,
         machineName,
-        files: [],
-        dateFolders: [],
         partSummaries: [],
-        message: "No weld data directory found",
-      });
-    }
-
-    const fileInfos: WeldFileInfo[] = [];
-    const allRawData: WeldRawData[] = [];
-
-    const dateFolders = listDateFolders(weldDir);
-
-    if (dateFolders.length > 0) {
-      const foldersToProcess = dateFilter ? dateFolders.filter((folder) => folder.startsWith(dateFilter as string)) : dateFolders;
-
-      for (const dateFolder of foldersToProcess) {
-        const dateFolderPath = path.join(weldDir, dateFolder);
-        let hourlyFiles = listHourlyFiles(dateFolderPath);
-
-        if (hourFilter) {
-          hourlyFiles = hourlyFiles.filter((file) => file.includes(`_${hourFilter}_`));
-        }
-
-        for (const dbFile of hourlyFiles) {
-          const filePath = path.join(dateFolderPath, dbFile);
-          const rawData = readWeldSQLite(filePath);
-
-          if (rawData.length > 0) {
-            fileInfos.push({
-              fileName: `${dateFolder}/${dbFile}`,
-              date: rawData[0]?.date || "",
-              recordCount: rawData.length,
-            });
-
-            allRawData.push(...rawData);
-          }
-        }
-      }
-    } else {
-      const files = fs.readdirSync(weldDir);
-      let dbFiles = files.filter((file) => (file.endsWith("_Weld.db") || file.endsWith("_weld.db")) && fs.statSync(path.join(weldDir, file)).isFile());
-
-      if (dateFilter) {
-        dbFiles = dbFiles.filter((file) => file.startsWith(dateFilter as string));
-      }
-
-      for (const dbFile of dbFiles) {
-        const filePath = path.join(weldDir, dbFile);
-        const rawData = readWeldSQLite(filePath);
-
-        if (rawData.length > 0) {
-          fileInfos.push({
-            fileName: dbFile,
-            date: rawData[0]?.date || "",
-            recordCount: rawData.length,
-          });
-
-          allRawData.push(...rawData);
-        }
-      }
-    }
-
-    if (fileInfos.length === 0) {
-      return res.status(200).json({
-        arcFunctionId,
-        ipAddress,
-        machineName,
-        files: [],
-        dateFolders,
-        partSummaries: [],
-        selectedDate: dateFilter,
-        message: dateFilter ? `No weld data files found for date ${dateFilter}` : "No weld data files found",
+        seamRows: [],
+        pagination: { page: 1, limit: 20, totalItems: 0, totalPages: 0, hasNextPage: false, hasPrevPage: false },
       });
     }
 
     const partSummaries = createPartSummaries(allRawData);
-
     let seamRows = createFlatSeamRows(partSummaries);
 
     if ((search as string).trim()) {
@@ -309,15 +316,12 @@ const getWeldData = async (req: Request, res: Response) => {
     const totalItems = seamRows.length;
     const totalPages = Math.ceil(totalItems / limitNum);
     const startIndex = (pageNum - 1) * limitNum;
-    const endIndex = startIndex + limitNum;
-    const paginatedRows = seamRows.slice(startIndex, endIndex);
+    const paginatedRows = seamRows.slice(startIndex, startIndex + limitNum);
 
     return res.status(200).json({
       arcFunctionId,
       ipAddress,
       machineName,
-      files: fileInfos,
-      dateFolders,
       partSummaries,
       seamRows: paginatedRows,
       pagination: {
@@ -328,7 +332,6 @@ const getWeldData = async (req: Request, res: Response) => {
         hasNextPage: pageNum < totalPages,
         hasPrevPage: pageNum > 1,
       },
-      selectedDate: dateFilter,
     });
   } catch (error) {
     console.error("Error fetching weld data:", error);
@@ -340,7 +343,10 @@ const getWeldDates = async (req: Request, res: Response) => {
   try {
     const { arcFunctionId } = req.params;
 
-    const arcFunctionResult = await dbPool.query(`SELECT ip_address, machine_name, machine_type FROM arc_function WHERE id = $1`, [arcFunctionId]);
+    const arcFunctionResult = await dbPool.query(
+      `SELECT ip_address, machine_name, machine_type FROM arc_function WHERE id = $1`,
+      [arcFunctionId],
+    );
 
     if (arcFunctionResult.rowCount === 0) {
       return res.status(404).json({ message: "Arc Function not found" });
@@ -348,67 +354,26 @@ const getWeldDates = async (req: Request, res: Response) => {
 
     const { ip_address: ipAddress, machine_name: machineName, machine_type: machineType } = arcFunctionResult.rows[0];
 
-    const weldDir = getWeldDirectory(ipAddress);
-
-    if (!fs.existsSync(weldDir)) {
-      return res.status(200).json({
-        arcFunctionId,
-        ipAddress,
-        machineName,
-        machineType,
-        dates: [],
-        message: "No weld data directory found",
-      });
-    }
-
-    const dateFolders = listDateFolders(weldDir);
-
-    interface DateInfo {
-      date: string;
-      folderName: string;
-      hourlyFiles: string[];
-    }
-
-    const dates: DateInfo[] = [];
-
-    for (const folderName of dateFolders) {
-      const dateMatch = folderName.match(/^(\d{4}-\d{2}-\d{2})_[Ww]eld$/);
-      if (dateMatch) {
-        const dateFolderPath = path.join(weldDir, folderName);
-        const hourlyFiles = listHourlyFiles(dateFolderPath);
-
-        dates.push({
-          date: dateMatch[1],
-          folderName,
-          hourlyFiles,
-        });
-      }
-    }
-
-    if (dates.length === 0) {
-      const files = fs.readdirSync(weldDir);
-      const dbFiles = files.filter((file) => (file.endsWith("_Weld.db") || file.endsWith("_weld.db")) && fs.statSync(path.join(weldDir, file)).isFile());
-
-      for (const dbFile of dbFiles) {
-        const dateMatch = dbFile.match(/^(\d{4}-\d{2}-\d{2})_[Ww]eld\.db$/);
-        if (dateMatch) {
-          dates.push({
-            date: dateMatch[1],
-            folderName: "",
-            hourlyFiles: [dbFile],
-          });
-        }
-      }
-    }
-
-    dates.sort((a, b) => b.date.localeCompare(a.date));
+    const dates = await WeldHeaderModel.aggregate([
+      { $match: { IpAdress: ipAddress } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$CreatedAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: -1 } },
+    ]);
 
     return res.status(200).json({
       arcFunctionId,
       ipAddress,
       machineName,
       machineType,
-      dates: dates,
+      dates: dates.map((d) => ({
+        date: d._id,
+        weldCount: d.count,
+      })),
     });
   } catch (error) {
     console.error("Error fetching weld dates:", error);
@@ -432,18 +397,9 @@ const getWeldSeams = async (req: Request, res: Response) => {
     }
 
     const { ip_address: ipAddress } = arcFunctionResult.rows[0];
-    const weldDir = getWeldDirectory(ipAddress);
 
-    if (!fs.existsSync(weldDir)) {
-      return res.status(200).json({
-        partSerialId: partSerialId || null,
-        partItemNumber: partItemNumber || null,
-        seams: [],
-        otherOperations: [],
-      });
-    }
+    const allRawData = await fetchWeldRawData(ipAddress, date as string | undefined);
 
-    const allRawData = readAllWeldData(weldDir);
     const filteredData = allRawData.filter((d) => {
       let matchIdentifier = false;
       if (partSerialId) {
@@ -456,9 +412,6 @@ const getWeldSeams = async (req: Request, res: Response) => {
         return false;
       }
 
-      if (date && d.date) {
-        return matchIdentifier && d.date === date;
-      }
       return matchIdentifier;
     });
 
@@ -466,9 +419,7 @@ const getWeldSeams = async (req: Request, res: Response) => {
 
     if (seamNumber && startTime) {
       const seamNum = parseInt(seamNumber as string);
-
       const selectedSeam = allSeams.find((s) => s.seamNumber === seamNum && s.startTime === startTime);
-
       const otherOperations = allSeams.filter((s) => s.seamNumber === seamNum && s.startTime !== startTime);
 
       return res.status(200).json({
@@ -521,19 +472,8 @@ const getWeldActual = async (req: Request, res: Response) => {
     }
 
     const { ip_address: ipAddress } = arcFunctionResult.rows[0];
-    const weldDir = getWeldDirectory(ipAddress);
 
-    if (!fs.existsSync(weldDir)) {
-      return res.status(200).json({
-        partSerialId: partSerialId || null,
-        partItemNumber: partItemNumber || null,
-        seamNumber: parseInt(seamNumber as string),
-        operationIndex: operationIndex ? parseInt(operationIndex as string) : null,
-        actualData: [],
-      });
-    }
-
-    const allRawData = readAllWeldData(weldDir);
+    const allRawData = await fetchWeldRawData(ipAddress, date as string | undefined);
 
     let filteredData = allRawData.filter((d) => {
       let matchIdentifier = false;
@@ -547,9 +487,6 @@ const getWeldActual = async (req: Request, res: Response) => {
         return false;
       }
 
-      if (date && d.date) {
-        return matchIdentifier && d.date === date;
-      }
       return matchIdentifier;
     });
 
@@ -566,7 +503,7 @@ const getWeldActual = async (req: Request, res: Response) => {
       let currentOpIndex = 0;
       let currentOperation: WeldRawData[] = [];
       let currentSeamNumber: number | null = null;
-      let currentDataPart: number | null = null;
+      let currentDataPart: string | null = null;
 
       for (const data of filteredData) {
         const isNewOperation = currentSeamNumber === null || data.seamNumber !== currentSeamNumber || data.dataPart !== currentDataPart;
@@ -599,7 +536,7 @@ const getWeldActual = async (req: Request, res: Response) => {
       time: d.time,
       actualVoltage: d.actualVoltage,
       actualCurrent: d.actualCurrent,
-      wireSpeed: d.wireSpeed,
+      actualWireSpeed: d.actualWireSpeed,
       torqueM1: d.torqueM1,
       torqueM2: d.torqueM2,
       actualGasFlow: d.actualGasFlow,
