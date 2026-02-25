@@ -18,4 +18,5 @@ export interface UserRequestDto {
   email: string;
   role: string;
   password: string;
+  controllerIds: string[];
 }

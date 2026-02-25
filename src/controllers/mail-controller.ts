@@ -13,14 +13,14 @@ const sendMailHandler = async (req: Request, res: Response) => {
     }
 
     return res.status(200).json({ message: "Email sent successfully!" });
-  } catch (error) {
+  } catch (error: any) {
     console.error("An error occured while sent email" + error);
-    return res.status(500).json({ message: "Failed to send email!" });
+    return res.status(500).json({ message: `Failed to send email: ${error?.message}` });
   }
 };
 
 const createScheduledMail = async (req: Request, res: Response) => {
-  const { recipient, scheduleDate, message, subject } = req.body;  
+  const { recipient, scheduleDate, message, subject } = req.body;
 
   const newMailJobId = uuidv4();
   const client = await dbPool.connect();
@@ -46,24 +46,35 @@ const createScheduledMail = async (req: Request, res: Response) => {
 
 const getScheduleMailData = async (req: Request, res: Response) => {
   try {
-    const scheduledMailDbRes = await dbPool.query(`SELECT * FROM scheduled_mail_jobs`)
+    const scheduledMailDbRes = await dbPool.query(`SELECT * FROM scheduled_mail_jobs`);
     const scheduledMailStatisticDbRes = await dbPool.query(`
       SELECT
         COUNT(*) FILTER (WHERE status = 'SENT') as "sentCount",
         COUNT(*) FILTER (WHERE status = 'PENDING') as "pendingCount",
         COUNT(*) FILTER (WHERE status = 'FAIL') as "failCount"
       FROM scheduled_mail_jobs
-    `)    
+    `);
 
     const scheduledMailRes = {
       data: scheduledMailDbRes.rows || [],
-      counts: scheduledMailStatisticDbRes.rows[0]
-    }
-    return res.status(200).json(scheduledMailRes); 
+      counts: scheduledMailStatisticDbRes.rows[0],
+    };
+    return res.status(200).json(scheduledMailRes);
   } catch (error: any) {
     console.error("DB ERROR:", error.message);
-    return res.status(500).json({message: 'Internal Server Error'})
+    return res.status(500).json({ message: "Internal Server Error" });
   }
-}
+};
 
-export { sendMailHandler, createScheduledMail, getScheduleMailData };
+const deleteScheduledMail = async (req: Request, res: Response) => {
+  const mailId = req.params?.id;
+  try {
+    await dbPool.query(`DELETE FROM scheduled_mail_jobs WHERE id = $1`, [mailId]);
+    return res.status(200).json({ message: "Mail job deleted successfully" });
+  } catch (error: any) {
+    console.error("DB ERROR:", error.message);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export { sendMailHandler, createScheduledMail, getScheduleMailData, deleteScheduledMail };

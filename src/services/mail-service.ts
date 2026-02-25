@@ -1,12 +1,26 @@
 import nodemailer from "nodemailer";
 import { dbPool } from "../config/db";
+import { z } from "zod";
 
 interface TransporterConfig {
   smtp_host: string;
-  smtp_port: number;
+  smtp_port: string;
   smtp_user: string;
   smtp_password: string;
 }
+
+interface SendMailProps {
+  email: string;
+  message: string;
+  subject: string;
+}
+
+const smtpConfigSchema = z.object({
+  smtp_host: z.string().min(1, "SMTP host bilgisi eksik"),
+  smtp_port: z.string().min(1, "SMTP Port geçersiz"),
+  smtp_user: z.string().email("Geçersiz SMTP kullanıcı e-postası"),
+  smtp_password: z.string().min(1, "SMTP şifresi geçersiz"),
+});
 
 const createDynamicTransporter = ({ smtp_host, smtp_port, smtp_user, smtp_password }: TransporterConfig) => {
   return nodemailer.createTransport({
@@ -26,18 +40,15 @@ const createDynamicTransporter = ({ smtp_host, smtp_port, smtp_user, smtp_passwo
     },
   });
 };
-interface SendMailProps {
-  email: string;
-  message: string;
-  subject: string;
-}
 
 export const sendMail = async ({ email, message, subject }: SendMailProps): Promise<void> => {
   const smtpConfigDbRes = await dbPool.query<TransporterConfig>(`SELECT smtp_host, smtp_port, smtp_user, smtp_password FROM company`);
 
   const smtpConfigData = smtpConfigDbRes.rows[0];
 
-  const transporter = createDynamicTransporter(smtpConfigData);
+  const validateData = smtpConfigSchema.parse(smtpConfigData);
+
+  const transporter = createDynamicTransporter(validateData);
 
   await transporter.sendMail({
     from: smtpConfigData.smtp_user,
