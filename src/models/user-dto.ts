@@ -8,6 +8,7 @@ export interface UserResponseDto {
   bcryptPassword: string;
   roleId?: string;
   roleName?: string;
+  controllerIds: string[];
 }
 
 export interface UserRequestDto {

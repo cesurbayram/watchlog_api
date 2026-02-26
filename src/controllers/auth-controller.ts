@@ -12,16 +12,19 @@ const login = async (req: Request, res: Response) => {
   try {
     const userDbRes = await dbPool.query<UserResponseDto>(
       `
-                SELECT
-                    u.id,
-                    u.name,
-                    u.last_name AS "lastName", 
-                    u.user_name AS "userName", 
-                    u.email,
-                    u.role_id AS "roleId",
-                    r.name AS "roleName", 
-                    u.bcrypt_password as "bcryptPassword"
-                FROM users u LEFT JOIN role r ON u.role_id=r.id WHERE u.email = $1
+        SELECT
+        u.id,
+        u.name,
+        u.last_name AS "lastName",
+        u.user_name AS "userName",
+        u.email,
+        u.role_id AS "roleId",
+        r.name AS "roleName",
+        u.bcrypt_password as "bcryptPassword",
+      COALESCE(JSON_AGG(cup.controller_id) FILTER (WHERE cup.controller_id IS NOT NULL), '[]') AS "controllerIds"
+      FROM users u LEFT JOIN role r ON u.role_id=r.id
+        LEFT JOIN controller_user_permission cup ON u.id = cup.user_id
+      WHERE u.email = $1 GROUP BY u.id, r.name
             `,
       [email],
     );
@@ -45,6 +48,7 @@ const login = async (req: Request, res: Response) => {
       email: userData.email,
       roleId: userData.roleId,
       roleName: userData.roleName,
+      controllerIds: userData.controllerIds,
     };
 
     const secret = process.env.SECRET;
