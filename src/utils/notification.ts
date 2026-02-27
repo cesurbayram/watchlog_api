@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 export const broadcastAndInsertNotification = async ({ type, title, message, data }: any) => {
   const client = await dbPool.connect();
   const newNotificationId = uuidv4();
+  const controllerId = data?.controllerId || null;
 
   try {
     await client.query("BEGIN");
@@ -29,12 +30,19 @@ export const broadcastAndInsertNotification = async ({ type, title, message, dat
               false,
               $5
             FROM users u
+            WHERE ($6::text IS NULL) OR
+            (u.id IN (SELECT user_id FROM controller_user_permission WHERE controller_id = $6))
             RETURNING id, user_id, type, title, message, data, is_read, created_at, notification_id;
             `,
-      [type, title, message, data || null, newNotificationId],
+      [type, title, message, data || null, newNotificationId, controllerId],
     );
 
     await client.query("COMMIT");
+
+    if (result.rowCount === 0) {
+      console.log("Bildirim gönderilecek yetkili kullanıcı bulunamadı.");
+      return null;
+    }
 
     const newNotification = result.rows[0];
 

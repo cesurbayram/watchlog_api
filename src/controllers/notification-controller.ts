@@ -3,9 +3,8 @@ import { dbPool } from "../config/db";
 import { broadcastAndInsertNotification } from "../utils/notification";
 
 const getNotifications = async (req: Request, res: Response) => {
-  const { user_id } = req.query
-  
-  
+  const { user_id } = req.query;
+
   try {
     let query = `
           SELECT id, type, title, message, data, user_id, is_read, created_at, updated_at, notification_id
@@ -37,7 +36,7 @@ const createNotification = async (req: Request, res: Response) => {
   }
 
   try {
-    const newNotification = await broadcastAndInsertNotification({data, message, title, type})
+    const newNotification = await broadcastAndInsertNotification({ data, message, title, type });
     return res.status(201).json(newNotification);
   } catch (error) {
     console.error("Error creating notification:", error);
@@ -46,8 +45,8 @@ const createNotification = async (req: Request, res: Response) => {
 };
 
 const deleteAllNotifications = async (req: Request, res: Response) => {
-  const {userId} = req.params
-  
+  const { userId } = req.params;
+
   const client = await dbPool.connect();
   try {
     const result = await client.query("DELETE FROM notifications WHERE user_id = $1", [userId]);
@@ -66,13 +65,11 @@ const deleteAllNotifications = async (req: Request, res: Response) => {
 
 const markReadAllNotifications = async (req: Request, res: Response) => {
   const { notification_ids, user_id } = req.body;
-    
 
   const client = await dbPool.connect();
 
   try {
     let query = `UPDATE notifications SET is_read = true, updated_at = CURRENT_TIMESTAMP WHERE notification_id = ANY($1) AND user_id = $2`;
-    
 
     const result = await client.query(query, [notification_ids, user_id]);
 
@@ -89,7 +86,7 @@ const markReadAllNotifications = async (req: Request, res: Response) => {
 };
 
 const deleteNotificationById = async (req: Request, res: Response) => {
-  const {notificationId, userId} = req.params;
+  const { notificationId, userId } = req.params;
 
   if (!notificationId) {
     return res.status(400).json({ error: "ID is required" });
