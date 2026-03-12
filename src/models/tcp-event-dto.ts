@@ -82,6 +82,20 @@ export interface TCPStatistics {
   changesByParameter: Record<string, number>;
 }
 
+export interface IToolData {
+  toolNumber: number;
+  name: string;
+  tcp: { x: number; y: number; z: number; rx: number; ry: number; rz: number };
+  cog: { xg: number; yg: number; zg: number };
+  weight: number;
+  inertia: { ix: number; iy: number; iz: number };
+}
+
+export interface TcpSnapshotData {
+  tools: IToolData[];
+  recordedAt: string;
+}
+
 export interface TCPLogsResponse {
   success: boolean;
   events: TCPDataEntry[];
@@ -93,4 +107,6 @@ export interface TCPLogsResponse {
   lastModified?: string;
   savedToDb?: boolean;
   newEventsCount?: number;
+  latestSnapshot?: TcpSnapshotData;
+  previousSnapshot?: TcpSnapshotData | null;
 }

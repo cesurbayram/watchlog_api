@@ -129,7 +129,7 @@ export const getTeachingEventsFromDatabase = async (req: Request, res: Response)
 
     const [events, total] = await Promise.all([
       TeachingEventModel.find(filter)
-        .sort({ eventIndex: -1 })
+        .sort({ eventIndex: 1 })
         .skip(offsetNum)
         .limit(limitNum)
         .lean(),

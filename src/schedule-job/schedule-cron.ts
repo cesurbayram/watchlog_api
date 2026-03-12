@@ -4,10 +4,9 @@ import { processScheduledMails } from "./job-service";
 const startCronJobs = () => {
   cron.schedule("* * * * *", async () => {
     try {
-      //console.log("cron çalıştı");
       await processScheduledMails();
     } catch (error) {
-      console.error("Cron error: ", error);
+      console.error("Cron error (mail): ", error);
     }
   });
 };
