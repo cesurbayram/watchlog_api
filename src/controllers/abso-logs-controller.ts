@@ -1,17 +1,17 @@
 import { Request, Response } from "express";
-import AbsoEventModel from "../models/mongo/abso-event.model";
+import AbsoSnapshotModel from "../models/mongo/abso-snapshot.model";
 import { compareAbsoValues, calculateAbsoStatistics } from "../services/abso-parser.service";
 import { AbsoluteDataEntry, AbsoLogsResponse } from "../models/abso-event-dto";
 import { dbPool } from "../config/db";
 
-const mongoDocToAbsoEntry = (doc: any): AbsoluteDataEntry => ({
-  index: doc.eventIndex,
-  date: doc.eventDate ? doc.eventDate.toISOString() : "",
-  groupNumber: doc.groupNumber || "",
-  axisNumber: doc.axisNumber || "",
-  setValue: doc.setValue || "",
+const absoSnapshotToEntry = (doc: any): AbsoluteDataEntry => ({
+  index: 0,
+  date: doc.recordedAt ? doc.recordedAt.toISOString() : "",
+  groupNumber: "",
+  axisNumber: "",
+  setValue: "",
   currValue: doc.currValue || { R1: {} },
-  rawEntry: doc.rawEntry || "",
+  rawEntry: "",
   controllerId: doc.controllerId,
   controllerName: doc.controllerName,
 });
@@ -37,11 +37,11 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
 
     const controller = controllerResult.rows[0];
 
-    const docs = await AbsoEventModel.find({ controllerId })
-      .sort({ eventDate: -1 })
+    const snapshotDocs = await AbsoSnapshotModel.find({ controllerId })
+      .sort({ recordedAt: -1 })
       .lean();
 
-    const absoEvents: AbsoluteDataEntry[] = docs.map(mongoDocToAbsoEntry);
+    const absoEvents: AbsoluteDataEntry[] = snapshotDocs.map(absoSnapshotToEntry);
     const comparisons = compareAbsoValues(absoEvents);
     const statistics = calculateAbsoStatistics(absoEvents);
 
@@ -71,11 +71,11 @@ export const getAbsoLogsByControllerId = async (req: Request, res: Response) => 
 
 const handleAllControllersAbso = async (req: Request, res: Response) => {
   try {
-    const docs = await AbsoEventModel.find({})
-      .sort({ eventDate: -1 })
+    const snapshotDocs = await AbsoSnapshotModel.find({})
+      .sort({ recordedAt: -1 })
       .lean();
 
-    const allAbsoEvents: AbsoluteDataEntry[] = docs.map(mongoDocToAbsoEntry);
+    const allAbsoEvents: AbsoluteDataEntry[] = snapshotDocs.map(absoSnapshotToEntry);
     const comparisons = compareAbsoValues(allAbsoEvents);
     const statistics = calculateAbsoStatistics(allAbsoEvents);
 
@@ -111,26 +111,28 @@ export const getAbsoEventsFromDatabase = async (req: Request, res: Response) => 
     const filter: any = { controllerId };
 
     if (startDate || endDate) {
-      filter.eventDate = {};
-      if (startDate) filter.eventDate.$gte = new Date(startDate as string);
-      if (endDate) filter.eventDate.$lte = new Date(endDate as string);
+      filter.recordedAt = {};
+      if (startDate) filter.recordedAt.$gte = new Date(startDate as string);
+      if (endDate) filter.recordedAt.$lte = new Date(endDate as string);
     }
 
     const limitNum = limit ? parseInt(limit as string, 10) : 100;
     const offsetNum = offset ? parseInt(offset as string, 10) : 0;
 
-    const [events, total] = await Promise.all([
-      AbsoEventModel.find(filter)
-        .sort({ eventIndex: -1 })
+    const [snapshotDocs, total] = await Promise.all([
+      AbsoSnapshotModel.find(filter)
+        .sort({ recordedAt: -1 })
         .skip(offsetNum)
         .limit(limitNum)
         .lean(),
-      AbsoEventModel.countDocuments(filter),
+      AbsoSnapshotModel.countDocuments(filter),
     ]);
+
+    const paginated = snapshotDocs.map(absoSnapshotToEntry);
 
     return res.status(200).json({
       success: true,
-      events: events.map(mongoDocToAbsoEntry),
+      events: paginated,
       total,
       limit: limitNum,
       offset: offsetNum,
@@ -156,9 +158,9 @@ export const getAbsoHistory = async (req: Request, res: Response) => {
     const matchStage: any = { controllerId };
 
     if (startDate || endDate) {
-      matchStage.eventDate = {};
-      if (startDate) matchStage.eventDate.$gte = new Date(startDate as string);
-      if (endDate) matchStage.eventDate.$lte = new Date(endDate as string);
+      matchStage.recordedAt = {};
+      if (startDate) matchStage.recordedAt.$gte = new Date(startDate as string);
+      if (endDate) matchStage.recordedAt.$lte = new Date(endDate as string);
     }
 
     let dateGroupFormat: string;
@@ -173,33 +175,16 @@ export const getAbsoHistory = async (req: Request, res: Response) => {
         dateGroupFormat = "%Y-%m-%d";
     }
 
-    const stats = await AbsoEventModel.aggregate([
+    const stats = await AbsoSnapshotModel.aggregate([
       { $match: matchStage },
       {
         $group: {
-          _id: { $dateToString: { format: dateGroupFormat, date: "$eventDate" } },
+          _id: { $dateToString: { format: dateGroupFormat, date: "$recordedAt" } },
           total_events: { $sum: 1 },
-          axis_changes: {
-            $sum: {
-              $add: [
-                { $cond: [{ $ifNull: ["$currValue.R1.S", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.L", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.U", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.R", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.B", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.T", false] }, 1, 0] },
-              ],
-            },
-          },
+          axis_changes: { $sum: 6 },
         },
       },
-      {
-        $project: {
-          stat_date: "$_id",
-          total_events: 1,
-          axis_changes: 1,
-        },
-      },
+      { $project: { stat_date: "$_id", total_events: 1, axis_changes: 1 } },
       { $sort: { stat_date: -1 } },
     ]);
 
@@ -218,25 +203,14 @@ export const getAbsoHistory = async (req: Request, res: Response) => {
 
 export const getAllControllersAbsoSummaryEndpoint = async (req: Request, res: Response) => {
   try {
-    const summary = await AbsoEventModel.aggregate([
+    const summary = await AbsoSnapshotModel.aggregate([
       {
         $group: {
           _id: "$controllerId",
           controllerName: { $first: "$controllerName" },
           total_events: { $sum: 1 },
-          last_abso_date: { $max: "$eventDate" },
-          axis_changes: {
-            $sum: {
-              $add: [
-                { $cond: [{ $ifNull: ["$currValue.R1.S", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.L", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.U", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.R", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.B", false] }, 1, 0] },
-                { $cond: [{ $ifNull: ["$currValue.R1.T", false] }, 1, 0] },
-              ],
-            },
-          },
+          last_abso_date: { $max: "$recordedAt" },
+          axis_changes: { $sum: 6 },
         },
       },
       {
@@ -272,7 +246,7 @@ export const checkAbsoData = async (req: Request, res: Response) => {
   }
 
   try {
-    const hasData = await AbsoEventModel.exists({ controllerId });
+    const hasData = await AbsoSnapshotModel.exists({ controllerId });
 
     return res.status(200).json({
       success: true,

@@ -4,6 +4,10 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { connectMongoDB } from "./config/mongo.js";
 import { LogPipelineService } from "./services/log-pipeline.service.js";
+import { AbsoDatPipelineService } from "./services/abso-dat-pipeline.service.js";
+import { TcpDatPipelineService } from "./services/tcp-dat-pipeline.service.js";
+import { AlarmDatPipelineService } from "./services/alarm-dat-pipeline.service.js";
+import { JobDatPipelineService } from "./services/job-dat-pipeline.service.js";
 
 import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/user.js";
@@ -113,6 +117,24 @@ async function startServer() {
 
   const pipeline = new LogPipelineService(io);
   pipeline.start();
+
+  const absoDatPipeline = new AbsoDatPipelineService(io);
+  absoDatPipeline.start();
+
+  const tcpDatPipeline = new TcpDatPipelineService(io);
+  tcpDatPipeline.start();
+
+  const alarmDatPipeline = new AlarmDatPipelineService(io);
+  alarmDatPipeline.start();
+
+  const jobDatPipeline = new JobDatPipelineService(io);
+  jobDatPipeline.start();
+
+  app.set("alarmDatPipeline", alarmDatPipeline);
+  app.set("absoDatPipeline", absoDatPipeline);
+  app.set("tcpDatPipeline", tcpDatPipeline);
+  app.set("jobDatPipeline", jobDatPipeline);
+  app.set("logPipeline", pipeline);
 
   httpServer.listen(port, () => {
     console.log(`Server listening on port ${port}`);

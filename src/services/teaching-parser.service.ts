@@ -53,6 +53,43 @@ export const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: str
         controllerId,
         controllerName,
       });
+    } else if (event === "stop") {
+      const jobName = entry.fields["JOB NAME"];
+      const line = entry.fields["LINE"];
+      const stopFactor = entry.fields["STOP FACTOR"];
+      const detailFactor = entry.fields["DETAIL FACTOR 1"];
+      const parts = [jobName && `Job: ${jobName}`, line && `Line: ${line}`, stopFactor, detailFactor].filter(Boolean);
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "STOP",
+        fileName: jobName,
+        lineNumber: line,
+        details: parts.length > 0 ? parts.join(" | ") : "Robot stopped",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event === "power off") {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "POWER_OFF",
+        details: "Power turned off",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event === "power on") {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "POWER_ON",
+        details: "Power turned on",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
     }
   });
 

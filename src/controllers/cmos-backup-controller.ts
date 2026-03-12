@@ -6,6 +6,70 @@ import fs from "fs";
 import archiver from "archiver";
 import { handleAllControllers, parseLogContent } from "../utils/cmos-backup";
 
+function parseFolderNameToDate(folderName: string): string | null {
+  const match = folderName.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})_(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  return `${year}-${month}-${day}T${hour}:${minute}:00`;
+}
+
+
+function resolveBackupFolder(
+  backupBaseDir: string,
+  controllerIp: string,
+  controllerName: string | null,
+  sessionTime: Date,
+  expectedFileNames?: string[]
+): { folderPath: string; folderName: string } | null {
+  const year = sessionTime.getFullYear();
+  const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
+  const day = String(sessionTime.getDate()).padStart(2, "0");
+  const hour = String(sessionTime.getHours()).padStart(2, "0");
+  const minute = String(sessionTime.getMinutes()).padStart(2, "0");
+  const hourUtc = String(sessionTime.getUTCHours()).padStart(2, "0");
+  const minuteUtc = String(sessionTime.getUTCMinutes()).padStart(2, "0");
+
+  const possibleFolderNames = [
+    ...(controllerName ? [`${controllerName}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`] : []),
+    `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+    `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+    `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
+    ...(controllerName ? [`${controllerName}_${controllerIp}_${year}-${month}-${day}_${hourUtc}_${minuteUtc}`] : []),
+    `or_${controllerIp}_${year}-${month}-${day}_${hourUtc}_${minuteUtc}`,
+    `or1_${controllerIp}_${year}-${month}-${day}_${hourUtc}_${minuteUtc}`,
+    `or2_${controllerIp}_${year}-${month}-${day}_${hourUtc}_${minuteUtc}`,
+    controllerIp,
+  ];
+
+  for (const folderName of possibleFolderNames) {
+    const testPath = path.join(backupBaseDir, folderName);
+    if (fs.existsSync(testPath) && fs.statSync(testPath).isDirectory()) {
+      return { folderPath: testPath, folderName };
+    }
+  }
+
+  if (expectedFileNames && expectedFileNames.length > 0 && fs.existsSync(backupBaseDir)) {
+    const entries = fs.readdirSync(backupBaseDir, { withFileTypes: true });
+    let bestMatch: { path: string; name: string; count: number } | null = null;
+
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !ent.name.includes(controllerIp)) continue;
+      const folderPath = path.join(backupBaseDir, ent.name);
+      const filesInFolder = new Set(fs.readdirSync(folderPath));
+      const matchCount = expectedFileNames.filter((f) => filesInFolder.has(f)).length;
+      if (matchCount > 0 && (!bestMatch || matchCount > bestMatch.count)) {
+        bestMatch = { path: folderPath, name: ent.name, count: matchCount };
+      }
+    }
+    if (bestMatch) {
+      console.log(`Found backup folder via scan (${bestMatch.count} files): ${bestMatch.path}`);
+      return { folderPath: bestMatch.path, folderName: bestMatch.name };
+    }
+  }
+
+  return null;
+}
+
 const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
@@ -32,6 +96,7 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
               bs.created_at,
               bs.plan_id,
               bs.backup_type,
+              bs.backup_folder_path,
               c.name as controller_name,
               bp.name as plan_name
             FROM backup_sessions bs
@@ -42,7 +107,6 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
           `;
       queryParams = [];
     } else {
-      // Get sessions for specific controller
       query = `
             SELECT 
               bs.id,
@@ -57,6 +121,7 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
               bs.created_at,
               bs.plan_id,
               bs.backup_type,
+              bs.backup_folder_path,
               c.name as controller_name,
               bp.name as plan_name
             FROM backup_sessions bs
@@ -70,7 +135,15 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
     }
 
     const result = await dbPool.query(query, queryParams);
-    return res.status(200).json(result.rows);
+    const rows = result.rows.map((row: { backup_folder_path?: string;[key: string]: unknown }) => {
+      let backup_folder_time: string | null = null;
+      if (row.backup_folder_path) {
+        const folderName = path.basename(row.backup_folder_path);
+        backup_folder_time = parseFolderNameToDate(folderName);
+      }
+      return { ...row, backup_folder_time };
+    });
+    return res.status(200).json(rows);
   } catch (error) {
     console.error("Error fetching backup history:", error);
     return res.status(500).json({ error: "Failed to fetch backup history" });
@@ -115,7 +188,7 @@ const createZipBySessionId = async (req: Request, res: Response) => {
   }
 
   try {
-    // Opsiyonel: Kategori bazlı dosya filtresi
+   
     let fileFilter: string[] | null = null;
     let categoryName: string | null = null;
     try {
@@ -127,7 +200,7 @@ const createZipBySessionId = async (req: Request, res: Response) => {
         categoryName = body.category;
       }
     } catch {
-      // Body yoksa tüm dosyaları indir
+     
     }
 
     const sessionQuery = `
@@ -163,32 +236,30 @@ const createZipBySessionId = async (req: Request, res: Response) => {
     const backupBaseDir =
       process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
 
-    const year = sessionTime.getFullYear();
-    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
-    const day = String(sessionTime.getDate()).padStart(2, "0");
-    const hour = String(sessionTime.getHours()).padStart(2, "0");
-    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
-
-    const possibleFolderNames = [
-      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      controllerIp,
-    ];
-
-    if (session.controller_name) {
-      possibleFolderNames.unshift(`${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`);
-    }
-
     let controllerBackupDir: string | null = null;
     let backupFolderName: string | null = null;
-    for (const folderName of possibleFolderNames) {
-      const testPath = path.join(backupBaseDir, folderName);
-      if (fs.existsSync(testPath)) {
-        controllerBackupDir = testPath;
-        backupFolderName = folderName;
-        console.log(`Found backup folder: ${testPath}`);
-        break;
+
+    if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
+      controllerBackupDir = session.backup_folder_path;
+      backupFolderName = path.basename(session.backup_folder_path);
+      console.log(`Using stored backup folder: ${controllerBackupDir}`);
+    } else {
+      const expectedFileNames = filesResult.rows.map((r: { file_name: string }) => r.file_name);
+      const resolved = resolveBackupFolder(
+        backupBaseDir,
+        controllerIp,
+        session.controller_name,
+        sessionTime,
+        expectedFileNames
+      );
+      if (resolved) {
+        controllerBackupDir = resolved.folderPath;
+        backupFolderName = resolved.folderName;
+        console.log(`Found backup folder: ${controllerBackupDir}`);
+        await dbPool.query(`UPDATE backup_sessions SET backup_folder_path = $1 WHERE id = $2`, [
+          resolved.folderPath,
+          sessionId,
+        ]);
       }
     }
 
@@ -196,7 +267,6 @@ const createZipBySessionId = async (req: Request, res: Response) => {
       return res.status(404).json({
         error: "Backup directory not found",
         message: `Could not find backup folder for session ${sessionId}`,
-        searchedPaths: possibleFolderNames.map((f) => path.join(backupBaseDir, f)),
         hint: "Make sure backup files have been created first",
       });
     }
@@ -305,42 +375,61 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
     const session = sessionResult.rows[0];
     const controllerIp = session.ip_address;
     const sessionTime = new Date(session.session_start_time);
+    const backupBaseDir =
+      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
 
-    const year = sessionTime.getFullYear();
-    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
-    const day = String(sessionTime.getDate()).padStart(2, "0");
-    const hour = String(sessionTime.getHours()).padStart(2, "0");
-    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
-
-    const possibleFolderNames = [
-      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      controllerIp,
-    ];
-
-    if (session.controller_name) {
-      possibleFolderNames.unshift(`${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`);
+    let folderName: string | null = null;
+    if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
+      folderName = path.basename(session.backup_folder_path);
+    } else {
+      const filesForResolve = await dbPool.query(
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        [sessionId]
+      );
+      const expectedFileNames = filesForResolve.rows.map((r: { file_name: string }) => r.file_name);
+      const resolved = resolveBackupFolder(
+        backupBaseDir,
+        controllerIp,
+        session.controller_name,
+        sessionTime,
+        expectedFileNames
+      );
+      if (resolved) folderName = resolved.folderName;
     }
 
     const tempDir = os.tmpdir();
     const categorySuffix = category ? `_${(category as string).replace(/[^a-zA-Z0-9]/g, "_")}` : "";
 
-    for (const folderName of possibleFolderNames) {
+    if (folderName) {
       if (category) {
         const categoryZipPath = path.join(tempDir, `${folderName}${categorySuffix}.zip`);
         if (fs.existsSync(categoryZipPath)) {
           zipFilePath = categoryZipPath;
           console.log(`Found category ZIP file: ${categoryZipPath}`);
-          break;
         }
       }
+      if (!zipFilePath) {
+        const testZipPath = path.join(tempDir, `${folderName}.zip`);
+        if (fs.existsSync(testZipPath)) {
+          zipFilePath = testZipPath;
+          console.log(`Found ZIP file: ${testZipPath}`);
+        }
+      }
+    }
 
-      const testZipPath = path.join(tempDir, `${folderName}.zip`);
-      if (fs.existsSync(testZipPath)) {
-        zipFilePath = testZipPath;
-        console.log(`Found ZIP file: ${testZipPath}`);
-        break;
+    if (!zipFilePath && fs.existsSync(tempDir)) {
+      const zips = fs.readdirSync(tempDir).filter((f) => f.endsWith(".zip") && f.includes(controllerIp));
+      if (zips.length > 0) {
+        const match = category
+          ? zips.find((f) => f.includes((category as string).replace(/[^a-zA-Z0-9]/g, "_")))
+          : zips.sort(
+            (a, b) =>
+              fs.statSync(path.join(tempDir, b)).mtime.getTime() - fs.statSync(path.join(tempDir, a)).mtime.getTime()
+          )[0];
+        if (match) {
+          zipFilePath = path.join(tempDir, match);
+          console.log(`Found ZIP via scan: ${zipFilePath}`);
+        }
       }
     }
 
@@ -524,7 +613,9 @@ const getReadFileBySessionIdWithFileName = async (req: Request, res: Response) =
           SELECT 
             bs.controller_ip,
             bs.session_start_time,
-            c.name as controller_name
+            bs.backup_folder_path,
+            c.name as controller_name,
+            c.ip_address
           FROM backup_sessions bs
           LEFT JOIN controller c ON bs.controller_id = c.id
           WHERE bs.id = $1
@@ -537,35 +628,41 @@ const getReadFileBySessionIdWithFileName = async (req: Request, res: Response) =
     }
 
     const session = sessionResult.rows[0];
-    const controllerIp = session.controller_ip;
+    const controllerIp = session.ip_address || session.controller_ip;
     const sessionTime = new Date(session.session_start_time);
-
-    const year = sessionTime.getFullYear();
-    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
-    const day = String(sessionTime.getDate()).padStart(2, "0");
-    const hour = String(sessionTime.getHours()).padStart(2, "0");
-    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
 
     const backupBaseDir =
       process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
 
-    const possibleFolderNames = [
-      `${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-    ];
+    let folderPath: string | null = null;
 
-    let filePath: string | null = null;
+    if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
+      const testPath = path.join(session.backup_folder_path, fileName);
+      if (fs.existsSync(testPath)) folderPath = session.backup_folder_path;
+    }
 
-    for (const folderName of possibleFolderNames) {
-      const testPath = path.join(backupBaseDir, folderName, fileName);
-      if (fs.existsSync(testPath)) {
-        filePath = testPath;
-        break;
+    if (!folderPath) {
+      const resolved = resolveBackupFolder(backupBaseDir, controllerIp, session.controller_name, sessionTime, [
+        fileName,
+      ]);
+      if (resolved) {
+        folderPath = resolved.folderPath;
+        await dbPool.query(`UPDATE backup_sessions SET backup_folder_path = $1 WHERE id = $2`, [
+          resolved.folderPath,
+          sessionId,
+        ]);
       }
     }
 
-    if (!filePath) {
+    if (!folderPath) {
+      return res.status(400).json({
+        success: false,
+        error: "Backup folder or file not found on disk",
+      });
+    }
+
+    const filePath = path.join(folderPath, fileName);
+    if (!fs.existsSync(filePath)) {
       return res.status(400).json({
         success: false,
         error: "File not found on disk",
@@ -603,7 +700,9 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
           SELECT 
             bs.controller_ip,
             bs.session_start_time,
-            c.name as controller_name
+            bs.backup_folder_path,
+            c.name as controller_name,
+            c.ip_address
           FROM backup_sessions bs
           LEFT JOIN controller c ON bs.controller_id = c.id
           WHERE bs.id = $1
@@ -616,35 +715,35 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
     }
 
     const session = sessionResult.rows[0];
-    const controllerIp = session.controller_ip;
+    const controllerIp = session.ip_address || session.controller_ip;
     const sessionTime = new Date(session.session_start_time);
-
-    const year = sessionTime.getFullYear();
-    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
-    const day = String(sessionTime.getDate()).padStart(2, "0");
-    const hour = String(sessionTime.getHours()).padStart(2, "0");
-    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
 
     const backupBaseDir =
       process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
 
-    const possibleFolderNames = [
-      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-    ];
-
-    if (session.controller_name) {
-      possibleFolderNames.push(`${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`);
-    }
-
     let backupFolderPath: string | null = null;
 
-    for (const folderName of possibleFolderNames) {
-      const testPath = path.join(backupBaseDir, folderName);
-      if (fs.existsSync(testPath)) {
-        backupFolderPath = testPath;
-        break;
+    if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
+      backupFolderPath = session.backup_folder_path;
+    } else {
+      const filesResult = await dbPool.query(
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        [sessionId]
+      );
+      const expectedFileNames = filesResult.rows.map((r: { file_name: string }) => r.file_name);
+      const resolved = resolveBackupFolder(
+        backupBaseDir,
+        controllerIp,
+        session.controller_name,
+        sessionTime,
+        expectedFileNames
+      );
+      if (resolved) {
+        backupFolderPath = resolved.folderPath;
+        await dbPool.query(`UPDATE backup_sessions SET backup_folder_path = $1 WHERE id = $2`, [
+          resolved.folderPath,
+          sessionId,
+        ]);
       }
     }
 
@@ -652,7 +751,6 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
       return res.status(400).json({
         success: false,
         error: "Backup folder not found on disk",
-        searchedPaths: possibleFolderNames,
       });
     }
 
@@ -702,7 +800,9 @@ const deleteBackupSessionBySessionId = async (req: Request, res: Response) => {
       SELECT 
         bs.controller_ip,
         bs.session_start_time,
-        c.name as controller_name
+        bs.backup_folder_path,
+        c.name as controller_name,
+        c.ip_address
       FROM backup_sessions bs
       LEFT JOIN controller c ON bs.controller_id = c.id
       WHERE bs.id = $1
@@ -714,41 +814,43 @@ const deleteBackupSessionBySessionId = async (req: Request, res: Response) => {
     }
 
     const session = sessionResult.rows[0];
-    const controllerIp = session.controller_ip;
+    const controllerIp = session.ip_address || session.controller_ip;
     const sessionTime = new Date(session.session_start_time);
-
-
-    const year = sessionTime.getFullYear();
-    const month = String(sessionTime.getMonth() + 1).padStart(2, "0");
-    const day = String(sessionTime.getDate()).padStart(2, "0");
-    const hour = String(sessionTime.getHours()).padStart(2, "0");
-    const minute = String(sessionTime.getMinutes()).padStart(2, "0");
 
     const backupBaseDir =
       process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
 
-    const possibleFolderNames = [
-      `or_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or1_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-      `or2_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`,
-    ];
-
-    if (session.controller_name) {
-      possibleFolderNames.push(`${session.controller_name}_${controllerIp}_${year}-${month}-${day}_${hour}_${minute}`);
-    }
-
     let deletedFolderPath: string | null = null;
-    for (const folderName of possibleFolderNames) {
-      const testPath = path.join(backupBaseDir, folderName);
-      if (fs.existsSync(testPath)) {
+
+    if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
+      try {
+        fs.rmSync(session.backup_folder_path, { recursive: true, force: true });
+        deletedFolderPath = session.backup_folder_path;
+        console.log(`Deleted backup folder: ${deletedFolderPath}`);
+      } catch (fsError) {
+        console.error(`Failed to delete backup folder ${session.backup_folder_path}:`, fsError);
+      }
+    } else {
+      const filesResult = await client.query(
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        [sessionId]
+      );
+      const expectedFileNames = filesResult.rows.map((r: { file_name: string }) => r.file_name);
+      const resolved = resolveBackupFolder(
+        backupBaseDir,
+        controllerIp,
+        session.controller_name,
+        sessionTime,
+        expectedFileNames
+      );
+      if (resolved) {
         try {
-          fs.rmSync(testPath, { recursive: true, force: true });
-          deletedFolderPath = testPath;
-          console.log(`Deleted backup folder: ${testPath}`);
+          fs.rmSync(resolved.folderPath, { recursive: true, force: true });
+          deletedFolderPath = resolved.folderPath;
+          console.log(`Deleted backup folder: ${deletedFolderPath}`);
         } catch (fsError) {
-          console.error(`Failed to delete backup folder ${testPath}:`, fsError);
+          console.error(`Failed to delete backup folder ${resolved.folderPath}:`, fsError);
         }
-        break;
       }
     }
 
@@ -819,21 +921,21 @@ const getBackupFoldersForController = async (req: Request, res: Response) => {
       });
     }
 
-    // Read all folders in backup directory
+
     const allFolders = fs.readdirSync(backupBaseDir);
 
-    // Filter folders that belong to this controller (by IP or name)
+
     const controllerFolders = allFolders.filter((folder) => {
-      // Match patterns like: or_192.168.1.1_2024-01-15_10_30, controllerName_192.168.1.1_2024-01-15_10_30
+
       return folder.includes(controllerIp) || (controllerName && folder.startsWith(controllerName + "_"));
     });
 
-    // Get details for each folder
+
     const folderDetails = controllerFolders.map((folderName) => {
       const folderPath = path.join(backupBaseDir, folderName);
       const stats = fs.statSync(folderPath);
-      
-      // Try to parse date from folder name
+
+
       const dateMatch = folderName.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})_(\d{2})/);
       let parsedDate = null;
       if (dateMatch) {
@@ -841,13 +943,13 @@ const getBackupFoldersForController = async (req: Request, res: Response) => {
         parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
       }
 
-      // Count files in folder
+
       let fileCount = 0;
       try {
         const files = fs.readdirSync(folderPath);
         fileCount = files.filter((f) => fs.statSync(path.join(folderPath, f)).isFile()).length;
       } catch (e) {
-        // Ignore errors
+
       }
 
       return {
@@ -860,7 +962,7 @@ const getBackupFoldersForController = async (req: Request, res: Response) => {
       };
     });
 
-    // Sort by date (newest first)
+
     folderDetails.sort((a, b) => {
       const dateA = a.parsedDate || a.createdAt;
       const dateB = b.parsedDate || b.createdAt;
@@ -881,7 +983,7 @@ const getBackupFoldersForController = async (req: Request, res: Response) => {
   }
 };
 
-// Read files from a specific backup folder
+
 const getBackupFolderFiles = async (req: Request, res: Response) => {
   const { folderName } = req.params;
 
@@ -915,7 +1017,7 @@ const getBackupFolderFiles = async (req: Request, res: Response) => {
       };
     });
 
-    // Sort files by name
+
     fileDetails.sort((a, b) => a.name.localeCompare(b.name));
 
     return res.status(200).json({
@@ -931,7 +1033,7 @@ const getBackupFolderFiles = async (req: Request, res: Response) => {
   }
 };
 
-// Read specific file content from backup folder
+
 const getBackupFileContent = async (req: Request, res: Response) => {
   const { folderName, fileName } = req.params;
 

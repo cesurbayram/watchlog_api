@@ -1,11 +1,5 @@
 import { Router } from "express";
-import {
-  createWorkOrder,
-  deleteWorkOrder,
-  getAlarmLogDetailByIdAndCode,
-  getWorkOrders,
-  sendWorkOrderMail,
-} from "../controllers/alarm-error-logs-controller";
+import { getAlarmLogDetailByIdAndCode } from "../controllers/alarm-error-logs-controller";
 import {
   createZipBySessionId,
   downloadZipBySessionId,
@@ -42,14 +36,25 @@ import {
   getAllControllersAbsoSummaryEndpoint,
   checkAbsoData,
 } from "../controllers/abso-logs-controller";
+import {
+  getAlarmLogsByControllerId,
+  getAlarmEventsFromDatabase,
+  checkAlarmData,
+  getAllControllersAlarmSummaryEndpoint,
+} from "../controllers/alarm-logs-controller";
+import {
+  getJobLogsByControllerId,
+  getJobEventsFromDatabase,
+  getJobHistory,
+  getJobLogsSummary,
+  checkJobData,
+  triggerJobMonitoringRun,
+} from "../controllers/job-logs-controller";
+import { scanAndProcessWatchlogFiles } from "../controllers/scan-watchlog-controller";
 
 const systemExpectationRouter = Router();
 
 systemExpectationRouter.get("/alarm-error-logs/alarm-detail", getAlarmLogDetailByIdAndCode);
-systemExpectationRouter.post("/alarm-error-logs/work-order", createWorkOrder);
-systemExpectationRouter.get("/alarm-error-logs/work-order", getWorkOrders);
-systemExpectationRouter.delete("/alarm-error-logs/work-order/:workOrderId", deleteWorkOrder);
-systemExpectationRouter.post("/alarm-error-logs/work-order/send-mail", sendWorkOrderMail);
 
 systemExpectationRouter.get("/cmos-backup/backup-history/:controllerId", getBackupHistoryByControllerId);
 systemExpectationRouter.get("/cmos-backup/backup-session/:sessionId", getBackupSessionBySessionId);
@@ -80,5 +85,16 @@ systemExpectationRouter.get("/abso-logs/:controllerId/from-db", getAbsoEventsFro
 systemExpectationRouter.get("/abso-logs/:controllerId/history", getAbsoHistory);
 systemExpectationRouter.get("/abso-logs/:controllerId/check", checkAbsoData);
 systemExpectationRouter.get("/abso-logs-summary", getAllControllersAbsoSummaryEndpoint);
+systemExpectationRouter.get("/alarm-logs/:controllerId", getAlarmLogsByControllerId);
+systemExpectationRouter.get("/alarm-logs/:controllerId/from-db", getAlarmEventsFromDatabase);
+systemExpectationRouter.get("/alarm-logs/:controllerId/check", checkAlarmData);
+systemExpectationRouter.get("/alarm-logs-summary", getAllControllersAlarmSummaryEndpoint);
+systemExpectationRouter.post("/job-logs/trigger-run", triggerJobMonitoringRun);
+systemExpectationRouter.get("/job-logs/:controllerId", getJobLogsByControllerId);
+systemExpectationRouter.get("/job-logs/:controllerId/from-db", getJobEventsFromDatabase);
+systemExpectationRouter.get("/job-logs/:controllerId/history", getJobHistory);
+systemExpectationRouter.get("/job-logs/:controllerId/check", checkJobData);
+systemExpectationRouter.get("/job-logs-summary", getJobLogsSummary);
+systemExpectationRouter.post("/scan-watchlog-files", scanAndProcessWatchlogFiles);
 
 export default systemExpectationRouter;

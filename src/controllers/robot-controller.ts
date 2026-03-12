@@ -501,28 +501,8 @@ const getAlarmsWithTypeByControllerId = async (req: Request, res: Response) => {
 
   try {
     if (types === "almhist") {
-      if (!type) {
-        return res.status(400).json({ message: `Type is required for ALMHIST` });
-      }
-
-      const dbRes = await dbPool.query(
-        `SELECT 
-           code, 
-           name, 
-           origin_date AS "originDate",
-           mode, 
-           type
-         FROM ${tableName}
-         WHERE controller_id = $1 AND type = $2
-         ORDER BY origin_date DESC NULLS LAST`,
-        [controllerId, type],
-      );
-
-      if (dbRes?.rowCount && dbRes.rowCount > 0) {
-        return res.status(200).json(dbRes.rows);
-      }
-
-      return res.status(404).json({ message: "No data found" });
+      // ALMHIST migrated to MongoDB - use /system-expectations/alarm-logs/:controllerId?type=
+      return res.status(200).json([]);
     }
 
     const dbRes = await dbPool.query(
