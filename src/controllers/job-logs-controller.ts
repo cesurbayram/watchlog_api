@@ -1,7 +1,11 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import JobChangeEventModel from "../models/mongo/job-change-event.model";
+import JobWatchTargetModel from "../models/mongo/job-watch-target.model";
 import { JobChangeEventDto, JobLogsResponse } from "../models/job-event-dto";
 import { dbPool } from "../config/db";
+import { readJobFileContent, createSimpleDiff } from "../utils/job-file-utils";
+import { runWatchedJobsFetch } from "../services/job-watch-fetch.service";
 
 const docToJobChangeEventDto = (doc: any): JobChangeEventDto => ({
   id: doc._id.toString(),
@@ -10,7 +14,6 @@ const docToJobChangeEventDto = (doc: any): JobChangeEventDto => ({
   jobName: doc.jobName,
   detectedAt: doc.detectedAt ? doc.detectedAt.toISOString() : "",
   changeType: doc.changeType,
-  diff: doc.diff,
   previousContentHash: doc.previousContentHash,
   newContentHash: doc.newContentHash,
 });
@@ -104,8 +107,23 @@ export const getJobEventsFromDatabase = async (req: Request, res: Response) => {
 
     if (startDate || endDate) {
       filter.detectedAt = {};
-      if (startDate) filter.detectedAt.$gte = new Date(startDate as string);
-      if (endDate) filter.detectedAt.$lte = new Date(endDate as string);
+      const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+      if (startDate) {
+        const s = startDate as string;
+        filter.detectedAt.$gte = DATE_ONLY.test(s)
+          ? new Date(`${s}T00:00:00.000Z`)
+          : new Date(s);
+      }
+      if (endDate) {
+        const e = endDate as string;
+        if (DATE_ONLY.test(e)) {
+          const end = new Date(`${e}T00:00:00.000Z`);
+          end.setUTCHours(23, 59, 59, 999);
+          filter.detectedAt.$lte = end;
+        } else {
+          filter.detectedAt.$lte = new Date(e);
+        }
+      }
     }
 
     if (jobName) {
@@ -290,6 +308,117 @@ export const triggerJobMonitoringRun = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: `Failed to run job scan: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+type WatchTargetBody = { targets?: { controllerId: string; jobName: string }[] };
+
+export const replaceJobWatchTargets = async (req: Request, res: Response) => {
+  try {
+    const { targets } = req.body as WatchTargetBody;
+    if (!Array.isArray(targets)) {
+      return res.status(400).json({ success: false, error: "targets[] is required" });
+    }
+
+    for (const t of targets) {
+      if (!t?.controllerId || !t?.jobName) {
+        return res.status(400).json({
+          success: false,
+          error: "Each target needs controllerId and jobName",
+        });
+      }
+    }
+
+    const seen = new Set<string>();
+    const unique: { controllerId: string; jobName: string }[] = [];
+    for (const t of targets) {
+      const controllerId = String(t.controllerId).trim();
+      const jobName = String(t.jobName).trim();
+      const key = `${controllerId}:${jobName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push({ controllerId, jobName });
+    }
+
+    await JobWatchTargetModel.deleteMany({});
+    if (unique.length > 0) {
+      await JobWatchTargetModel.insertMany(unique);
+    }
+
+    return res.status(200).json({ success: true, count: unique.length });
+  } catch (error) {
+    console.error("Error replacing job watch targets:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to save watch targets: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+export const fetchJobWatchTargetsNow = async (_req: Request, res: Response) => {
+  try {
+    const result = await runWatchedJobsFetch();
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("Error fetching watched jobs:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch watched jobs: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+export const getJobLogEventDiffModal = async (req: Request, res: Response) => {
+  const { eventId } = req.params;
+
+  if (!eventId || !mongoose.Types.ObjectId.isValid(eventId)) {
+    return res.status(400).json({ success: false, error: "Invalid event id" });
+  }
+
+  try {
+    const doc = await JobChangeEventModel.findById(eventId)
+      .select("+previousContent +newContent +diff")
+      .lean();
+
+    if (!doc) {
+      return res.status(404).json({ success: false, error: "Event not found" });
+    }
+
+    const cq = await dbPool.query(`SELECT ip_address, name FROM controller WHERE id = $1`, [
+      doc.controllerId,
+    ]);
+    const ip = cq.rows[0]?.ip_address as string | undefined;
+    const diskContent =
+      ip && typeof ip === "string" ? readJobFileContent(ip, doc.jobName) : null;
+
+    const previousContent =
+      typeof doc.previousContent === "string" ? doc.previousContent : "";
+    const newContentAtEvent = typeof doc.newContent === "string" ? doc.newContent : "";
+    const diffAtEvent = typeof doc.diff === "string" ? doc.diff : "";
+    const diskStr = diskContent ?? "";
+
+    const diffPreviousVsDisk = createSimpleDiff(previousContent, diskStr);
+
+    return res.status(200).json({
+      success: true,
+      jobName: doc.jobName,
+      controllerId: doc.controllerId,
+      controllerName: cq.rows[0]?.name,
+      changeType: doc.changeType,
+      detectedAt: doc.detectedAt ? new Date(doc.detectedAt).toISOString() : "",
+      previousContentFromMongo: previousContent,
+      newContentAtEvent,
+      diskContent: diskStr,
+      diffAtEvent,
+      diffPreviousVsDisk,
+      fileMissing: ip ? diskStr.length === 0 : true,
+    });
+  } catch (error) {
+    console.error("Error building job log diff modal:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to load diff: ${error instanceof Error ? error.message : "Unknown error"}`,
     });
   }
 };

@@ -1,7 +1,17 @@
 export interface TeachingEvent {
   index: number;
   date: string;
-  type: "POINT_MODIFICATION" | "INSTRUCTION_INSERT" | "INSTRUCTION_DELETE" | "TEACH_MODE" | "STOP" | "POWER_OFF" | "POWER_ON";
+  type:
+    | "POINT_MODIFICATION"
+    | "INSTRUCTION_INSERT"
+    | "INSTRUCTION_DELETE"
+    | "TEACH_MODE"
+    | "STOP"
+    | "POWER_OFF"
+    | "POWER_ON"
+    | "PARAMETER_EDIT"
+    | "SPEED_OVERRIDE_SETTING"
+    | "JOB_EDIT";
   fileName?: string;
   lineNumber?: string;
   details: string;

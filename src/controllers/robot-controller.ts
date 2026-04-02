@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
+import AbsoSnapshotModel from "../models/mongo/abso-snapshot.model";
 import { RobotRequestDto, RobotResponseDto } from "../models/robot-dto";
 import { v4 as uuidv4 } from "uuid";
 import { broadcastAndInsertNotification } from "../utils/notification";
@@ -534,14 +535,30 @@ const getAbsoDataWithControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
 
   try {
-    const absoData = await dbPool.query(
-      `SELECT * FROM abso_data 
-        WHERE controller_id = $1 
-        ORDER BY timestamp DESC`,
-      [controllerId],
-    );
+    const doc = await AbsoSnapshotModel.findOne({ controllerId })
+      .sort({ recordedAt: -1 })
+      .lean();
 
-    return res.status(200).json(absoData.rows);
+    if (!doc) {
+      return res.status(200).json([]);
+    }
+
+    const r1 = doc.currValue?.R1 ?? {};
+    const row = {
+      id: String(doc._id),
+      controller_id: doc.controllerId,
+      timestamp: doc.recordedAt
+        ? new Date(doc.recordedAt).toISOString()
+        : new Date().toISOString(),
+      S: r1.S ?? 0,
+      L: r1.L ?? 0,
+      U: r1.U ?? 0,
+      R: r1.R ?? 0,
+      B: r1.B ?? 0,
+      T: r1.T ?? 0,
+    };
+
+    return res.status(200).json([row]);
   } catch (error) {
     console.error("Error fetching abso data:", error);
     return res.status(500).json({ error: "Failed to fetch abso data" });

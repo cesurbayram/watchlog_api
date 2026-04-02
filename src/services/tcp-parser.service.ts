@@ -105,31 +105,40 @@ export const extractTCPDataEvents = (logEntries: LogEntry[], controllerId?: stri
 export const compareTCPValues = (entries: TCPDataEntry[]): TCPComparison[] => {
   if (entries.length < 2) return [];
 
-  const comparisons: TCPComparison[] = [];
-
-  for (let i = 0; i < Math.min(entries.length - 1, 5); i++) {
-    const current = entries[i];
-    const previous = entries[i + 1];
-
-    if (current.elementNumber === previous.elementNumber) {
-      const newVal = parseFloat(current.elementValue) || 0;
-      const oldVal = parseFloat(previous.elementValue) || 0;
-      const change = newVal - oldVal;
-      const changePercent = oldVal !== 0 ? (change / Math.abs(oldVal)) * 100 : 0;
-
-      comparisons.push({
-        toolNumber: current.parsedElement.actualToolNumber,
-        parameterName: current.parsedElement.parameterName,
-        parameterGroupName: current.parsedElement.parameterGroupName,
-        elementNumber: current.elementNumber,
-        oldValue: oldVal,
-        newValue: newVal,
-        change,
-        changePercent,
-      });
-    }
+  const byElement = new Map<string, TCPDataEntry[]>();
+  for (const e of entries) {
+    const list = byElement.get(e.elementNumber) ?? [];
+    list.push(e);
+    byElement.set(e.elementNumber, list);
   }
 
+  const comparisons: TCPComparison[] = [];
+
+  for (const [, group] of byElement) {
+    if (group.length < 2) continue;
+    group.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+    const current = group[0];
+    const previous = group[1];
+    const newVal = parseFloat(current.elementValue) || 0;
+    const oldVal = parseFloat(previous.elementValue) || 0;
+    const change = newVal - oldVal;
+    const changePercent = oldVal !== 0 ? (change / Math.abs(oldVal)) * 100 : 0;
+
+    comparisons.push({
+      toolNumber: current.parsedElement.actualToolNumber,
+      parameterName: current.parsedElement.parameterName,
+      parameterGroupName: current.parsedElement.parameterGroupName,
+      elementNumber: current.elementNumber,
+      oldValue: oldVal,
+      newValue: newVal,
+      change,
+      changePercent,
+    });
+  }
+
+  comparisons.sort((a, b) => a.elementNumber.localeCompare(b.elementNumber));
   return comparisons;
 };
 

@@ -5,7 +5,17 @@ export interface ITeachingEvent extends Document {
   controllerName?: string;
   eventIndex: number;
   eventDate: Date | null;
-  eventType: "POINT_MODIFICATION" | "INSTRUCTION_INSERT" | "INSTRUCTION_DELETE" | "TEACH_MODE" | "STOP" | "POWER_OFF" | "POWER_ON";
+  eventType:
+    | "POINT_MODIFICATION"
+    | "INSTRUCTION_INSERT"
+    | "INSTRUCTION_DELETE"
+    | "TEACH_MODE"
+    | "STOP"
+    | "POWER_OFF"
+    | "POWER_ON"
+    | "PARAMETER_EDIT"
+    | "SPEED_OVERRIDE_SETTING"
+    | "JOB_EDIT";
   fileName?: string;
   lineNumber?: string;
   details: string;
@@ -22,7 +32,18 @@ const TeachingEventSchema = new Schema(
     eventDate: { type: Date, default: null, index: true },
     eventType: {
       type: String,
-      enum: ["POINT_MODIFICATION", "INSTRUCTION_INSERT", "INSTRUCTION_DELETE", "TEACH_MODE", "STOP", "POWER_OFF", "POWER_ON"],
+      enum: [
+        "POINT_MODIFICATION",
+        "INSTRUCTION_INSERT",
+        "INSTRUCTION_DELETE",
+        "TEACH_MODE",
+        "STOP",
+        "POWER_OFF",
+        "POWER_ON",
+        "PARAMETER_EDIT",
+        "SPEED_OVERRIDE_SETTING",
+        "JOB_EDIT",
+      ],
       required: true,
     },
     fileName: { type: String },

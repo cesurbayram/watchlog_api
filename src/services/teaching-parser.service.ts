@@ -90,6 +90,41 @@ export const extractTeachingEvents = (logEntries: LogEntry[], controllerId?: str
         controllerId,
         controllerName,
       });
+    } else if (event.includes("parameter edit")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "PARAMETER_EDIT",
+        details: "Parameter edit",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (event.includes("speed override")) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "SPEED_OVERRIDE_SETTING",
+        details: "Speed override setting",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
+    } else if (
+      event.includes("job edit") &&
+      !event.includes("(p. mod)") &&
+      !event.includes("(ins)") &&
+      !event.includes("(del)")
+    ) {
+      events.push({
+        index: entry.index,
+        date: entry.date || "",
+        type: "JOB_EDIT",
+        details: "Job edit",
+        rawEntry: entry.rawData,
+        controllerId,
+        controllerName,
+      });
     }
   });
 

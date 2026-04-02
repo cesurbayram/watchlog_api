@@ -32,7 +32,7 @@ const createDynamicTransporter = ({ smtp_host, smtp_port, smtp_user, smtp_passwo
     //   pass: process.env.FROM_PASSWORD,
     // },
     host: smtp_host,
-    port: smtp_port,
+    port: parseInt(smtp_port, 10),
     //secure: true,
     auth: {
       user: smtp_user,

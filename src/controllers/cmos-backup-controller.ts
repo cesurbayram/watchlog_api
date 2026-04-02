@@ -72,69 +72,124 @@ function resolveBackupFolder(
 
 const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
+  const {
+    page: pageParam,
+    pageSize: pageSizeParam,
+    search,
+    dateFrom,
+    dateTo,
+    status,
+    controllerIds: controllerIdsParam,
+  } = req.query;
 
   if (!controllerId) {
     return res.status(400).json({ error: "Controller ID is required" });
   }
 
   try {
-    let query: string;
-    let queryParams: string[];
+    const page = Math.max(1, parseInt(pageParam as string) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(pageSizeParam as string) || 10));
+    const offset = (page - 1) * pageSize;
 
-    if (controllerId === "all") {
-      query = `
-            SELECT 
-              bs.id,
-              bs.controller_id,
-              bs.controller_ip,
-              bs.session_start_time,
-              bs.session_end_time,
-              bs.total_files,
-              bs.successful_files,
-              bs.failed_files,
-              bs.status,
-              bs.created_at,
-              bs.plan_id,
-              bs.backup_type,
-              bs.backup_folder_path,
-              c.name as controller_name,
-              bp.name as plan_name
-            FROM backup_sessions bs
-            LEFT JOIN controller c ON bs.controller_id = c.id
-            LEFT JOIN backup_plans bp ON bs.plan_id = bp.id
-            ORDER BY bs.session_start_time DESC
-            LIMIT 100
-          `;
-      queryParams = [];
-    } else {
-      query = `
-            SELECT 
-              bs.id,
-              bs.controller_id,
-              bs.controller_ip,
-              bs.session_start_time,
-              bs.session_end_time,
-              bs.total_files,
-              bs.successful_files,
-              bs.failed_files,
-              bs.status,
-              bs.created_at,
-              bs.plan_id,
-              bs.backup_type,
-              bs.backup_folder_path,
-              c.name as controller_name,
-              bp.name as plan_name
-            FROM backup_sessions bs
-            LEFT JOIN controller c ON bs.controller_id = c.id
-            LEFT JOIN backup_plans bp ON bs.plan_id = bp.id
-            WHERE bs.controller_id = $1
-            ORDER BY bs.session_start_time DESC
-            LIMIT 50
-          `;
-      queryParams = [controllerId];
+    const conditions: string[] = [];
+    const queryParams: (string | number | string[])[] = [];
+    let paramIndex = 1;
+
+    if (controllerId !== "all") {
+      conditions.push(`bs.controller_id = $${paramIndex}`);
+      queryParams.push(controllerId);
+      paramIndex++;
+    } else if (
+      typeof controllerIdsParam === "string" &&
+      controllerIdsParam.trim().length > 0
+    ) {
+      const idList = controllerIdsParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (idList.length > 0) {
+        conditions.push(`bs.controller_id = ANY($${paramIndex}::text[])`);
+        queryParams.push(idList);
+        paramIndex++;
+      }
     }
 
-    const result = await dbPool.query(query, queryParams);
+    if (status && typeof status === "string" && ["completed", "failed", "in_progress"].includes(status)) {
+      conditions.push(`bs.status = $${paramIndex}`);
+      queryParams.push(status);
+      paramIndex++;
+    }
+
+    if (dateFrom && typeof dateFrom === "string") {
+      conditions.push(`bs.session_start_time >= $${paramIndex}::timestamptz`);
+      queryParams.push(dateFrom);
+      paramIndex++;
+    }
+
+    if (dateTo && typeof dateTo === "string") {
+      conditions.push(`bs.session_start_time <= $${paramIndex}::timestamptz`);
+      const toDate = new Date(dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      queryParams.push(toDate.toISOString());
+      paramIndex++;
+    }
+
+    if (search && typeof search === "string" && search.trim()) {
+      const searchPattern = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(LOWER(bs.controller_ip) LIKE $${paramIndex} OR LOWER(c.name) LIKE $${paramIndex})`);
+      queryParams.push(searchPattern);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const baseQuery = `
+      FROM backup_sessions bs
+      LEFT JOIN controller c ON bs.controller_id = c.id
+      LEFT JOIN backup_plans bp ON bs.plan_id = bp.id
+      ${whereClause}
+    `;
+
+    const countResult = await dbPool.query(
+      `SELECT COUNT(*)::int as total ${baseQuery}`,
+      queryParams
+    );
+    const total = countResult.rows[0]?.total ?? 0;
+    const totalPages = Math.ceil(total / pageSize) || 1;
+
+    const countsResult = await dbPool.query(
+      `SELECT bs.status, COUNT(*)::int as cnt ${baseQuery} GROUP BY bs.status`,
+      queryParams
+    );
+    const countsByStatus: Record<string, number> = { completed: 0, failed: 0, in_progress: 0 };
+    countsResult.rows.forEach((r: { status: string; cnt: number }) => {
+      if (r.status in countsByStatus) countsByStatus[r.status] = r.cnt;
+    });
+
+    const dataQuery = `
+      SELECT 
+        bs.id,
+        bs.controller_id,
+        bs.controller_ip,
+        bs.session_start_time,
+        bs.session_end_time,
+        bs.total_files,
+        bs.successful_files,
+        bs.failed_files,
+        bs.status,
+        bs.created_at,
+        bs.plan_id,
+        bs.backup_type,
+        bs.backup_folder_path,
+        c.name as controller_name,
+        bp.name as plan_name
+      ${baseQuery}
+      ORDER BY bs.session_start_time DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+    queryParams.push(pageSize, offset);
+
+    const result = await dbPool.query(dataQuery, queryParams);
     const rows = result.rows.map((row: { backup_folder_path?: string;[key: string]: unknown }) => {
       let backup_folder_time: string | null = null;
       if (row.backup_folder_path) {
@@ -143,7 +198,15 @@ const getBackupHistoryByControllerId = async (req: Request, res: Response) => {
       }
       return { ...row, backup_folder_time };
     });
-    return res.status(200).json(rows);
+
+    return res.status(200).json({
+      sessions: rows,
+      total,
+      totalPages,
+      page,
+      pageSize,
+      countsByStatus,
+    });
   } catch (error) {
     console.error("Error fetching backup history:", error);
     return res.status(500).json({ error: "Failed to fetch backup history" });
@@ -223,14 +286,14 @@ const createZipBySessionId = async (req: Request, res: Response) => {
     const filesQuery = `
           SELECT file_name, file_type, backup_status
           FROM backup_file_details
-          WHERE session_id = $1 AND backup_status = true
+          WHERE session_id = $1
           ORDER BY backup_time ASC
         `;
 
     const filesResult = await dbPool.query(filesQuery, [sessionId]);
 
     if (filesResult.rows.length === 0) {
-      return res.status(404).json({ error: "No successful backup files found for this session" });
+      return res.status(404).json({ error: "No backup files found for this session" });
     }
 
     const backupBaseDir =
@@ -383,7 +446,7 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
       folderName = path.basename(session.backup_folder_path);
     } else {
       const filesForResolve = await dbPool.query(
-        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1`,
         [sessionId]
       );
       const expectedFileNames = filesForResolve.rows.map((r: { file_name: string }) => r.file_name);
@@ -727,7 +790,7 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
       backupFolderPath = session.backup_folder_path;
     } else {
       const filesResult = await dbPool.query(
-        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1`,
         [sessionId]
       );
       const expectedFileNames = filesResult.rows.map((r: { file_name: string }) => r.file_name);
@@ -832,7 +895,7 @@ const deleteBackupSessionBySessionId = async (req: Request, res: Response) => {
       }
     } else {
       const filesResult = await client.query(
-        `SELECT file_name FROM backup_file_details WHERE session_id = $1 AND backup_status = true`,
+        `SELECT file_name FROM backup_file_details WHERE session_id = $1`,
         [sessionId]
       );
       const expectedFileNames = filesResult.rows.map((r: { file_name: string }) => r.file_name);

@@ -81,7 +81,6 @@ export class LogPipelineService {
       }
     }
 
-    console.log(`[Pipeline] Manual scan: ${files.length} LOGDATA.DAT files found, ${processed} processed`);
     return { scanned: files.length, processed, errors };
   }
 
@@ -96,8 +95,6 @@ export class LogPipelineService {
 
     const controllerId = controller.id;
     const controllerName = controller.name;
-
-    console.log(`[Pipeline] Processing ${logEntries.length} log entries for ${controllerName} (${ipAddress})`);
 
     const newTeachingEvents = await this.processTeachingEvents(logEntries, controllerId, controllerName);
 

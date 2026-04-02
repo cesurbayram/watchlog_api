@@ -5,7 +5,14 @@ import { JobFileWatcherService, JobFileChangeEvent } from "./job-file-watcher.se
 import JobChangeEventModel from "../models/mongo/job-change-event.model";
 import JobBaselineModel from "../models/mongo/job-baseline.model";
 import { dbPool } from "../config/db";
-import { hashContent, findJobFilesInWatchlogDir } from "../utils/job-file-utils";
+import { hashContent, findJobFilesInWatchlogDir, createSimpleDiff } from "../utils/job-file-utils";
+
+const MAX_STORED_DIFF_LENGTH = 200_000;
+
+function capDiff(s: string): string {
+  if (s.length <= MAX_STORED_DIFF_LENGTH) return s;
+  return `${s.slice(0, MAX_STORED_DIFF_LENGTH)}\n\n… (truncated)`;
+}
 
 export class JobDatPipelineService {
   private fileWatcher: JobFileWatcherService;
@@ -92,6 +99,7 @@ export class JobDatPipelineService {
         controllerId,
         jobName,
         contentHash: newHash,
+        snapshotContent: content,
         lastCheckedAt: new Date(),
       });
       await JobChangeEventModel.create({
@@ -101,31 +109,44 @@ export class JobDatPipelineService {
         detectedAt: new Date(),
         changeType: "added",
         newContentHash: newHash,
+        newContent: content,
       });
       console.log(`[JobDatPipeline] Saved new baseline and JobChangeEvent (added) for ${controllerName}/${jobName}`);
     } else if (baseline.contentHash !== newHash) {
+      const previousSnap =
+        typeof baseline.snapshotContent === "string" ? baseline.snapshotContent : "";
+      const diffRaw = createSimpleDiff(previousSnap, content);
       await JobChangeEventModel.create({
         controllerId,
         controllerName,
         jobName,
         detectedAt: new Date(),
         changeType: "modified",
-        diff: `Content hash changed (previous: ${baseline.contentHash.slice(0, 16)}...)`,
+        diff: capDiff(diffRaw),
         previousContentHash: baseline.contentHash,
         newContentHash: newHash,
+        previousContent: previousSnap,
+        newContent: content,
       });
 
       await JobBaselineModel.findOneAndUpdate(
         { controllerId, jobName },
-        { contentHash: newHash, lastCheckedAt: new Date() }
+        {
+          contentHash: newHash,
+          snapshotContent: content,
+          lastCheckedAt: new Date(),
+        }
       );
 
       console.log(`[JobDatPipeline] Saved JobChangeEvent (modified) for ${controllerName}/${jobName}`);
     } else {
-      await JobBaselineModel.findOneAndUpdate(
-        { controllerId, jobName },
-        { lastCheckedAt: new Date() }
-      );
+      const patch: { lastCheckedAt: Date; snapshotContent?: string } = {
+        lastCheckedAt: new Date(),
+      };
+      if (!baseline.snapshotContent) {
+        patch.snapshotContent = content;
+      }
+      await JobBaselineModel.findOneAndUpdate({ controllerId, jobName }, patch);
     }
 
     this.io.to(`controller:${controllerId}`).emit("job-change:new", {

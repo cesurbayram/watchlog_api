@@ -48,9 +48,7 @@ export class AbsoFileWatcherService extends EventEmitter {
       .on("add", (filePath: string) => this.handleFileChange(filePath, "added"))
       .on("change", (filePath: string) => this.handleFileChange(filePath, "changed"))
       .on("error", (error: unknown) => console.error("[AbsoFileWatcher] Error:", error))
-      .on("ready", () => {
-        console.log(`[AbsoFileWatcher] Watching for ABSO.DAT changes in: ${this.baseDir}`);
-      });
+      .on("ready", () => {});
   }
 
   private handleFileChange(filePath: string, changeType: "added" | "changed"): void {

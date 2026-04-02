@@ -8,9 +8,12 @@ export interface IJobChangeEvent extends Document {
   jobName: string;
   detectedAt: Date;
   changeType: JobChangeType;
+  /** Line-based diff; optional in lean queries (select:false). */
   diff?: string;
   previousContentHash?: string;
   newContentHash?: string;
+  previousContent?: string;
+  newContent?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,9 +29,11 @@ const JobChangeEventSchema = new Schema(
       enum: ["modified", "added", "deleted"],
       required: true,
     },
-    diff: { type: String },
+    diff: { type: String, select: false },
     previousContentHash: { type: String },
     newContentHash: { type: String },
+    previousContent: { type: String, select: false },
+    newContent: { type: String, select: false },
   },
   { timestamps: true }
 );
