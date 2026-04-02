@@ -48,9 +48,7 @@ export class FileWatcherService extends EventEmitter {
       .on("add", (filePath: string) => this.handleFileChange(filePath, "added"))
       .on("change", (filePath: string) => this.handleFileChange(filePath, "changed"))
       .on("error", (error: unknown) => console.error("[FileWatcher] Error:", error))
-      .on("ready", () => {
-        console.log(`[FileWatcher] Watching for LOGDATA.DAT changes in: ${this.baseDir}`);
-      });
+      .on("ready", () => {});
   }
 
   private handleFileChange(filePath: string, changeType: "added" | "changed"): void {

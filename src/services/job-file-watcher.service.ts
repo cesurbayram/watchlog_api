@@ -49,9 +49,7 @@ export class JobFileWatcherService extends EventEmitter {
       .on("add", (filePath: string) => this.handleFileChange(filePath, "added"))
       .on("change", (filePath: string) => this.handleFileChange(filePath, "changed"))
       .on("error", (error: unknown) => console.error("[JobFileWatcher] Error:", error))
-      .on("ready", () => {
-        console.log(`[JobFileWatcher] Watching for *.JBI changes in: ${this.baseDir}`);
-      });
+      .on("ready", () => {});
   }
 
   private handleFileChange(filePath: string, changeType: "added" | "changed"): void {

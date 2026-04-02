@@ -48,15 +48,15 @@ export const getTcpLogsByControllerId = async (req: Request, res: Response) => {
 
     const latestSnapshot = snapshots[0]
       ? {
-          tools: snapshots[0].tools,
-          recordedAt: new Date(snapshots[0].recordedAt).toISOString(),
-        }
+        tools: snapshots[0].tools,
+        recordedAt: new Date(snapshots[0].recordedAt).toISOString(),
+      }
       : undefined;
     const previousSnapshot = snapshots[1]
       ? {
-          tools: snapshots[1].tools,
-          recordedAt: new Date(snapshots[1].recordedAt).toISOString(),
-        }
+        tools: snapshots[1].tools,
+        recordedAt: new Date(snapshots[1].recordedAt).toISOString(),
+      }
       : null;
 
     const response: TCPLogsResponse = {
@@ -186,6 +186,78 @@ export const getTcpEventsFromDatabase = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: `Failed to fetch TCP events: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+export const getTcpSnapshotsInRange = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const { startDate, endDate, dedupe } = req.query;
+  const dedupeByDay = dedupe !== "false" && dedupe !== "0";
+
+  if (!controllerId || controllerId === "all") {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+
+  if (!startDate && !endDate) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Provide startDate and/or endDate (ISO yyyy-MM-dd)" });
+  }
+
+  try {
+    const filter: Record<string, unknown> = { controllerId };
+    const range: Record<string, Date> = {};
+    if (startDate) range.$gte = new Date(startDate as string);
+    if (endDate) {
+      const end = new Date(endDate as string);
+      end.setHours(23, 59, 59, 999);
+      range.$lte = end;
+    }
+    if (Object.keys(range).length > 0) {
+      filter.recordedAt = range;
+    }
+
+    const raw = await TcpSnapshotModel.find(filter)
+      .sort({ recordedAt: -1 })
+      .limit(500)
+      .lean();
+
+    const toSnapshot = (doc: (typeof raw)[number]) => ({
+      tools: doc.tools,
+      recordedAt: new Date(doc.recordedAt).toISOString(),
+    });
+
+    const snapshots = dedupeByDay
+      ? (() => {
+          const byDay = new Map<string, (typeof raw)[number]>();
+          for (const doc of raw) {
+            const key = new Date(doc.recordedAt).toISOString().slice(0, 10);
+            if (!byDay.has(key)) byDay.set(key, doc);
+          }
+          return Array.from(byDay.values())
+            .map(toSnapshot)
+            .sort(
+              (a, b) =>
+                new Date(a.recordedAt).getTime() -
+                new Date(b.recordedAt).getTime()
+            );
+        })()
+      : [...raw]
+          .map(toSnapshot)
+          .sort(
+            (a, b) =>
+              new Date(a.recordedAt).getTime() -
+              new Date(b.recordedAt).getTime()
+          );
+
+    return res.status(200).json({ success: true, snapshots });
+  } catch (error) {
+    console.error("Error fetching TCP snapshots in range:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch TCP snapshots: ${error instanceof Error ? error.message : "Unknown error"
+        }`,
     });
   }
 };

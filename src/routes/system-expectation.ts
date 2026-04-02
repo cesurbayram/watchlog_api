@@ -25,6 +25,7 @@ import {
 import {
   getTcpLogsByControllerId,
   getTcpEventsFromDatabase,
+  getTcpSnapshotsInRange,
   getTcpHistory,
   getAllControllersTcpSummaryEndpoint,
   checkTcpData,
@@ -49,8 +50,16 @@ import {
   getJobLogsSummary,
   checkJobData,
   triggerJobMonitoringRun,
+  replaceJobWatchTargets,
+  fetchJobWatchTargetsNow,
+  getJobLogEventDiffModal,
 } from "../controllers/job-logs-controller";
 import { scanAndProcessWatchlogFiles } from "../controllers/scan-watchlog-controller";
+import {
+  getAllDataFetchSchedules,
+  getDataFetchScheduleByType,
+  updateDataFetchSchedule,
+} from "../controllers/data-fetch-schedule-controller";
 
 const systemExpectationRouter = Router();
 
@@ -75,6 +84,7 @@ systemExpectationRouter.get("/teaching-logs/:controllerId/history", getTeachingH
 systemExpectationRouter.get("/teaching-logs/:controllerId/files", getTeachingFileNames);
 systemExpectationRouter.get("/teaching-logs/:controllerId/check", checkTeachingData);
 systemExpectationRouter.get("/teaching-logs-summary", getAllControllersSummaryEndpoint);
+systemExpectationRouter.get("/tcp-logs/:controllerId/snapshots-range", getTcpSnapshotsInRange);
 systemExpectationRouter.get("/tcp-logs/:controllerId", getTcpLogsByControllerId);
 systemExpectationRouter.get("/tcp-logs/:controllerId/from-db", getTcpEventsFromDatabase);
 systemExpectationRouter.get("/tcp-logs/:controllerId/history", getTcpHistory);
@@ -90,11 +100,18 @@ systemExpectationRouter.get("/alarm-logs/:controllerId/from-db", getAlarmEventsF
 systemExpectationRouter.get("/alarm-logs/:controllerId/check", checkAlarmData);
 systemExpectationRouter.get("/alarm-logs-summary", getAllControllersAlarmSummaryEndpoint);
 systemExpectationRouter.post("/job-logs/trigger-run", triggerJobMonitoringRun);
+systemExpectationRouter.post("/job-logs/watch-targets/fetch-now", fetchJobWatchTargetsNow);
+systemExpectationRouter.post("/job-logs/watch-targets", replaceJobWatchTargets);
+systemExpectationRouter.get("/job-logs/events/:eventId/diff-modal", getJobLogEventDiffModal);
 systemExpectationRouter.get("/job-logs/:controllerId", getJobLogsByControllerId);
 systemExpectationRouter.get("/job-logs/:controllerId/from-db", getJobEventsFromDatabase);
 systemExpectationRouter.get("/job-logs/:controllerId/history", getJobHistory);
 systemExpectationRouter.get("/job-logs/:controllerId/check", checkJobData);
 systemExpectationRouter.get("/job-logs-summary", getJobLogsSummary);
 systemExpectationRouter.post("/scan-watchlog-files", scanAndProcessWatchlogFiles);
+
+systemExpectationRouter.get("/data-fetch-schedule", getAllDataFetchSchedules);
+systemExpectationRouter.get("/data-fetch-schedule/:type", getDataFetchScheduleByType);
+systemExpectationRouter.put("/data-fetch-schedule/:type", updateDataFetchSchedule);
 
 export default systemExpectationRouter;

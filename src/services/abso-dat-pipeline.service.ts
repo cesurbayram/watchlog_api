@@ -68,7 +68,6 @@ export class AbsoDatPipelineService {
       }
     }
 
-    console.log(`[AbsoDatPipeline] Manual scan: ${files.length} files found, ${processed} processed`);
     return { scanned: files.length, processed, errors };
   }
 

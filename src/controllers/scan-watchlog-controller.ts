@@ -1,5 +1,16 @@
 import { Request, Response } from "express";
 
+const VALID_SCOPES = ["alarm", "abso", "tcp", "job", "teach", "all"] as const;
+type ScanScope = (typeof VALID_SCOPES)[number];
+
+const ALL_KEYS: Exclude<ScanScope, "all">[] = [
+  "alarm",
+  "abso",
+  "tcp",
+  "job",
+  "teach",
+];
+
 export const scanAndProcessWatchlogFiles = async (req: Request, res: Response) => {
   try {
     const alarmPipeline = req.app.get("alarmDatPipeline");
@@ -15,33 +26,54 @@ export const scanAndProcessWatchlogFiles = async (req: Request, res: Response) =
       });
     }
 
-    const [alarmResult, absoResult, tcpResult, jobResult, logResult] = await Promise.all([
-      alarmPipeline.scanAndProcess(),
-      absoPipeline.scanAndProcess(),
-      tcpPipeline.scanAndProcess(),
-      jobPipeline.scanAndProcess(),
-      logPipeline.scanAndProcess(),
-    ]);
+    const raw = req.body?.scope;
+    const scope: ScanScope =
+      typeof raw === "string" && VALID_SCOPES.includes(raw as ScanScope)
+        ? (raw as ScanScope)
+        : "all";
 
-    const totalScanned =
-      alarmResult.scanned + absoResult.scanned + tcpResult.scanned + jobResult.scanned + logResult.scanned;
-    const totalProcessed =
-      alarmResult.processed + absoResult.processed + tcpResult.processed + jobResult.processed + logResult.processed;
-    const allErrors = [
-      ...alarmResult.errors,
-      ...absoResult.errors,
-      ...tcpResult.errors,
-      ...jobResult.errors,
-      ...logResult.errors,
-    ];
+    const pipelines: Record<
+      Exclude<ScanScope, "all">,
+      { scanAndProcess: () => Promise<{ scanned: number; processed: number; errors: string[] }> }
+    > = {
+      alarm: alarmPipeline,
+      abso: absoPipeline,
+      tcp: tcpPipeline,
+      job: jobPipeline,
+      teach: logPipeline,
+    };
+
+    const keysToRun: Exclude<ScanScope, "all">[] =
+      scope === "all" ? ALL_KEYS : [scope];
+
+    const entries = await Promise.all(
+      keysToRun.map(async (key) => {
+        const r = await pipelines[key].scanAndProcess();
+        return [key, r] as const;
+      })
+    );
+
+    const breakdown: Record<string, { scanned: number; processed: number; errors: string[] }> =
+      {};
+    let totalScanned = 0;
+    let totalProcessed = 0;
+    const allErrors: string[] = [];
+
+    for (const [key, r] of entries) {
+      breakdown[key] = r;
+      totalScanned += r.scanned;
+      totalProcessed += r.processed;
+      allErrors.push(...r.errors);
+    }
 
     return res.status(200).json({
       success: true,
-      alarm: alarmResult,
-      abso: absoResult,
-      tcp: tcpResult,
-      job: jobResult,
-      teaching: logResult,
+      scope,
+      alarm: breakdown.alarm,
+      abso: breakdown.abso,
+      tcp: breakdown.tcp,
+      job: breakdown.job,
+      teaching: breakdown.teach,
       totalScanned,
       totalProcessed,
       errors: allErrors,
