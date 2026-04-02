@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
-import { dbPool } from "../config/db";
+import { dbPool } from "../config/db.js";
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config.js";
 
 const getSystemInfoByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
@@ -21,7 +21,7 @@ const getSystemInfoByControllerId = async (req: Request, res: Response) => {
 
     const ipAddress = controllerResult.rows[0].ip_address;
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+    const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
     const systemInfoDir = path.join(baseDir, `${ipAddress}_SYSTEM`);
 

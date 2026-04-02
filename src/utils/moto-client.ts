@@ -1,4 +1,6 @@
-const MOTO_BASE_URL = process.env.MOTO_SERVER_URL || "http://localhost:8082";
+import { ON_PREM_MOTO_SERVER_URL } from "../config/on-prem-config.js";
+
+const MOTO_BASE_URL = ON_PREM_MOTO_SERVER_URL;
 
 export async function motoFetchFile(
   controllerId: string,

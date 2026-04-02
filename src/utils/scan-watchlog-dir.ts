@@ -1,14 +1,9 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config.js";
 
 export function getWatchlogBaseDir(): string {
-  return (
-    process.env.WATCHLOG_BASE_DIR ||
-    (process.platform === "win32"
-      ? path.join("C:", "Watchlog", "UI")
-      : path.join(os.homedir(), "Watchlog", "UI"))
-  );
+  return ON_PREM_WATCHLOG_BASE_DIR;
 }
 
 export function findFilesInWatchlogDir(

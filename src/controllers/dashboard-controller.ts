@@ -1,10 +1,10 @@
 import { Request, Response } from "express";
-import { dbPool } from "../config/db";
-import { getMaintenanceIntervals } from "../utils/robot-maintenance-intervals";
-import { parseSystemFile } from "../utils/parse-system-file";
+import { dbPool } from "../config/db.js";
+import { getMaintenanceIntervals } from "../utils/robot-maintenance-intervals.js";
+import { parseSystemFile } from "../utils/parse-system-file.js";
 import path from "path";
-import os from "os";
 import fs from "fs";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config.js";
 
 interface AlarmStats {
   hourlyData: { hour: string; count: number }[];
@@ -521,8 +521,7 @@ const getStats = async (req: Request, res: Response) => {
         lastMaintenanceMap.set(row.controller_id, row.servo_hours || 0);
       });
 
-      const baseDir =
-        process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+      const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
       // Calculate maintenance status for each controller
       for (const controller of controllersResult.rows) {

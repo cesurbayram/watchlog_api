@@ -1,8 +1,8 @@
 import { watch, type FSWatcher } from "chokidar";
 import path from "path";
-import os from "os";
 import fs from "fs";
 import { EventEmitter } from "events";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config.js";
 
 export interface JobFileChangeEvent {
   ipAddress: string;
@@ -19,12 +19,7 @@ export class JobFileWatcherService extends EventEmitter {
 
   constructor(baseDir?: string) {
     super();
-    this.baseDir =
-      baseDir ||
-      process.env.WATCHLOG_BASE_DIR ||
-      (process.platform === "win32"
-        ? path.join("C:", "Watchlog", "UI")
-        : path.join(os.homedir(), "Watchlog", "UI"));
+    this.baseDir = baseDir || ON_PREM_WATCHLOG_BASE_DIR;
   }
 
   start(): void {

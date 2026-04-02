@@ -1,4 +1,5 @@
-import { dbPool } from "../config/db";
+import { dbPool } from "../config/db.js";
+import { ON_PREM_NOTIFICATION_SERVER_URL } from "../config/on-prem-config.js";
 import { v4 as uuidv4 } from "uuid";
 
 export const broadcastAndInsertNotification = async ({ type, title, message, data }: any) => {
@@ -39,7 +40,7 @@ export const broadcastAndInsertNotification = async ({ type, title, message, dat
     const newNotification = result.rows[0];
 
     try {
-      await fetch(`${process.env.NOTIFICATION_SERVER_URL}/notify`, {
+      await fetch(`${ON_PREM_NOTIFICATION_SERVER_URL}/notify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

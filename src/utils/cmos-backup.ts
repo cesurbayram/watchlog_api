@@ -1,8 +1,8 @@
 import { Response, response } from "express";
-import { dbPool } from "../config/db";
+import { dbPool } from "../config/db.js";
 import path from "path";
-import os from "os";
 import fs from "fs";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config.js";
 import { LogEntry, LogFileContentResponse } from "../models/log-content";
 
 export function parseLogContent(content: string): LogEntry[] {
@@ -110,7 +110,7 @@ export async function handleAllControllers(): Promise<Response<LogFileContentRes
       });
     }
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+    const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
     const fileName = "LOGDATA.DAT";
     let allLogEntries: LogEntry[] = [];
