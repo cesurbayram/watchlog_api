@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { UserRequestDto } from "../models/user-dto";
 import { v4 as uuidv4 } from "uuid";
 import { dbPool } from "../config/db";
-import bcrypt from "bcrypt";
+import { hashPassword } from "../utils/bcrypt-async.js";
 
 const saltRounds = 10;
 
@@ -20,7 +20,7 @@ const createUser = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "User already exist!" });
     }
 
-    const bcryptPassword = password && (await bcrypt.hash(password, saltRounds));
+    const bcryptPassword = password && (await hashPassword(password, saltRounds));
 
     await client.query(
       `INSERT INTO "users" (id, name, last_name, user_name, email, role_id, bcrypt_password) 

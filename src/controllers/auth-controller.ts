@@ -1,4 +1,3 @@
-import bcrypt from "bcrypt";
 import { Request, Response } from "express";
 
 import { dbPool } from "../config/db.js";
@@ -6,6 +5,8 @@ import { ON_PREM_SECRET } from "../config/on-prem-config.js";
 import { LoginRequestDto } from "../models/auth-dto";
 import { UserResponseDto } from "../models/user-dto";
 import jwt from "jsonwebtoken";
+
+import { comparePassword } from "../utils/bcrypt-async.js";
 
 const login = async (req: Request, res: Response) => {
   const { email, password }: LoginRequestDto = req.body;
@@ -32,7 +33,10 @@ const login = async (req: Request, res: Response) => {
     }
 
     const userData = userDbRes.rows[0];
-    const isPasswordMatch = await bcrypt.compare(password, userData.bcryptPassword ? userData.bcryptPassword : "");
+    const isPasswordMatch = await comparePassword(
+      password,
+      userData.bcryptPassword ? userData.bcryptPassword : "",
+    );
 
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Wrong password!" });
