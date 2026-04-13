@@ -52,7 +52,9 @@ import {
   triggerJobMonitoringRun,
   replaceJobWatchTargets,
   fetchJobWatchTargetsNow,
+  getJobWatchTargetsList,
   getJobLogEventDiffModal,
+  getJobLogDiffHub,
 } from "../controllers/job-logs-controller";
 import { scanAndProcessWatchlogFiles } from "../controllers/scan-watchlog-controller";
 import {
@@ -101,8 +103,10 @@ systemExpectationRouter.get("/alarm-logs/:controllerId/check", checkAlarmData);
 systemExpectationRouter.get("/alarm-logs-summary", getAllControllersAlarmSummaryEndpoint);
 systemExpectationRouter.post("/job-logs/trigger-run", triggerJobMonitoringRun);
 systemExpectationRouter.post("/job-logs/watch-targets/fetch-now", fetchJobWatchTargetsNow);
+systemExpectationRouter.get("/job-logs/watch-targets", getJobWatchTargetsList);
 systemExpectationRouter.post("/job-logs/watch-targets", replaceJobWatchTargets);
 systemExpectationRouter.get("/job-logs/events/:eventId/diff-modal", getJobLogEventDiffModal);
+systemExpectationRouter.get("/job-logs/:controllerId/diff-hub", getJobLogDiffHub);
 systemExpectationRouter.get("/job-logs/:controllerId", getJobLogsByControllerId);
 systemExpectationRouter.get("/job-logs/:controllerId/from-db", getJobEventsFromDatabase);
 systemExpectationRouter.get("/job-logs/:controllerId/history", getJobHistory);

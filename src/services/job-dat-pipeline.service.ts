@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { JobFileWatcherService, JobFileChangeEvent } from "./job-file-watcher.service";
 import JobChangeEventModel from "../models/mongo/job-change-event.model";
 import JobBaselineModel from "../models/mongo/job-baseline.model";
+import JobWatchTargetModel from "../models/mongo/job-watch-target.model";
 import { dbPool } from "../config/db";
 import { hashContent, findJobFilesInWatchlogDir, createSimpleDiff } from "../utils/job-file-utils";
 
@@ -87,6 +88,15 @@ export class JobDatPipelineService {
 
     const controllerId = controller.id;
     const controllerName = controller.name;
+
+    const isWatched = await JobWatchTargetModel.exists({
+      controllerId,
+      jobName,
+    });
+    if (!isWatched) {
+      return;
+    }
+
     const newHash = hashContent(content);
 
     const baseline = await JobBaselineModel.findOne({

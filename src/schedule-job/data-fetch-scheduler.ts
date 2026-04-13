@@ -1,5 +1,6 @@
 import { dbPool } from "../config/db";
 import { motoFetchFile } from "../utils/moto-client";
+import JobWatchTargetModel from "../models/mongo/job-watch-target.model";
 
 type TaskType = "job" | "tcp" | "abso" | "alarm" | "teach";
 
@@ -28,14 +29,6 @@ async function getControllers(): Promise<{ id: string }[]> {
   return res.rows;
 }
 
-async function getJobsByController(controllerId: string): Promise<{ name: string }[]> {
-  const res = await dbPool.query(
-    `SELECT name FROM job_select WHERE controller_id = $1 ORDER BY name`,
-    [controllerId]
-  );
-  return res.rows;
-}
-
 async function updateLastRunAt(type: string): Promise<void> {
   await dbPool.query(
     `UPDATE data_fetch_schedule SET last_run_at = NOW(), updated_at = NOW() WHERE type = $1`,
@@ -43,25 +36,19 @@ async function updateLastRunAt(type: string): Promise<void> {
   );
 }
 
+/** Only JobWatchTarget rows (Job Logs UI), not the full job_select list. */
 export async function runJobFetch(): Promise<void> {
   if (!canStart("job")) {
     console.log("[DataFetch] Job fetch skipped - previous run still active");
     return;
   }
   try {
-    const controllers = await getControllers();
-    let totalFetched = 0;
-    for (const c of controllers) {
-      const jobs = await getJobsByController(c.id);
-      for (const j of jobs) {
-        const fileName = `${j.name}.JBI`;
-        const result = await motoFetchFile(c.id, fileName);
-        if (result.success) totalFetched++;
-        await new Promise((r) => setTimeout(r, 400));
-      }
+    const targets = await JobWatchTargetModel.find({}).lean();
+    for (const t of targets) {
+      await motoFetchFile(String(t.controllerId), `${String(t.jobName)}.JBI`);
+      await new Promise((r) => setTimeout(r, 400));
     }
     await updateLastRunAt("job");
-    // console.log(`[DataFetch] Job fetch done: ${controllers.length} controllers, ${totalFetched} jobs`);
   } catch (e) {
     console.error("[DataFetch] Job fetch error:", e);
   } finally {

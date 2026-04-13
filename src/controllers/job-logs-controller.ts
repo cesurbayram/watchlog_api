@@ -18,9 +18,26 @@ const docToJobChangeEventDto = (doc: any): JobChangeEventDto => ({
   newContentHash: doc.newContentHash,
 });
 
+function applyJobNameFilter(
+  filter: Record<string, unknown>,
+  jobName: unknown,
+  jobNames: unknown
+): void {
+  const namesCsv = jobNames ? String(jobNames).trim() : "";
+  const singleJob = jobName ? String(jobName).trim() : "";
+  if (singleJob) {
+    filter.jobName = singleJob;
+    return;
+  }
+  if (!namesCsv) return;
+  const names = namesCsv.split(",").map((s) => s.trim()).filter(Boolean);
+  if (names.length === 1) filter.jobName = names[0];
+  else if (names.length > 1) filter.jobName = { $in: names };
+}
+
 export const getJobLogsByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
-  const { limit = "50" } = req.query;
+  const { limit = "50", jobName, jobNames } = req.query;
 
   if (!controllerId) {
     return res.status(400).json({ success: false, error: "Controller ID is required" });
@@ -41,7 +58,10 @@ export const getJobLogsByControllerId = async (req: Request, res: Response) => {
     const controller = controllerResult.rows[0];
     const limitNum = parseInt(limit as string, 10) || 50;
 
-    const docs = await JobChangeEventModel.find({ controllerId })
+    const filter: Record<string, unknown> = { controllerId };
+    applyJobNameFilter(filter, jobName, jobNames);
+
+    const docs = await JobChangeEventModel.find(filter)
       .sort({ detectedAt: -1 })
       .limit(limitNum)
       .lean();
@@ -96,7 +116,7 @@ const handleAllControllersJobLogs = async (req: Request, res: Response) => {
 
 export const getJobEventsFromDatabase = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
-  const { startDate, endDate, jobName, limit, offset } = req.query;
+  const { startDate, endDate, jobName, jobNames, limit, offset } = req.query;
 
   if (!controllerId) {
     return res.status(400).json({ success: false, error: "Controller ID is required" });
@@ -126,9 +146,7 @@ export const getJobEventsFromDatabase = async (req: Request, res: Response) => {
       }
     }
 
-    if (jobName) {
-      filter.jobName = jobName;
-    }
+    applyJobNameFilter(filter, jobName, jobNames);
 
     const limitNum = limit ? parseInt(limit as string, 10) : 100;
     const offsetNum = offset ? parseInt(offset as string, 10) : 0;
@@ -356,6 +374,31 @@ export const replaceJobWatchTargets = async (req: Request, res: Response) => {
   }
 };
 
+/** List current watched job targets (for UI hydrate when localStorage is empty). */
+export const getJobWatchTargetsList = async (_req: Request, res: Response) => {
+  try {
+    const docs = await JobWatchTargetModel.find({}).lean();
+    const targets = docs
+      .map((d: { controllerId?: unknown; jobName?: unknown }) => ({
+        controllerId: String(d.controllerId ?? "").trim(),
+        jobName: String(d.jobName ?? "").trim(),
+      }))
+      .filter((t) => t.controllerId.length > 0 && t.jobName.length > 0);
+
+    return res.status(200).json({
+      success: true,
+      targets,
+    });
+  } catch (error) {
+    console.error("Error listing job watch targets:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to list watch targets: ${error instanceof Error ? error.message : "Unknown error"}`,
+      targets: [],
+    });
+  }
+};
+
 export const fetchJobWatchTargetsNow = async (_req: Request, res: Response) => {
   try {
     const result = await runWatchedJobsFetch();
@@ -365,6 +408,75 @@ export const fetchJobWatchTargetsNow = async (_req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: `Failed to fetch watched jobs: ${error instanceof Error ? error.message : "Unknown error"}`,
+    });
+  }
+};
+
+/** Latest before/after snapshots from Mongo + flat timeline for one job (split diff hub). */
+export const getJobLogDiffHub = async (req: Request, res: Response) => {
+  const { controllerId } = req.params;
+  const jobName = String(req.query.jobName ?? "").trim();
+
+  if (!controllerId) {
+    return res.status(400).json({ success: false, error: "Controller ID is required" });
+  }
+  if (!jobName) {
+    return res.status(400).json({ success: false, error: "jobName query is required" });
+  }
+
+  try {
+    const cq = await dbPool.query(`SELECT id, name FROM controller WHERE id = $1`, [controllerId]);
+    if (cq.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Controller not found" });
+    }
+    const controllerName = cq.rows[0]?.name as string | undefined;
+
+    const latest = await JobChangeEventModel.findOne({ controllerId, jobName })
+      .sort({ detectedAt: -1 })
+      .select("+previousContent +newContent")
+      .lean();
+
+    const timelineDocs = await JobChangeEventModel.find({ controllerId, jobName })
+      .sort({ detectedAt: -1 })
+      .limit(200)
+      .lean();
+
+    const events: JobChangeEventDto[] = timelineDocs.map((doc: any) => ({
+      id: doc._id.toString(),
+      controllerId: doc.controllerId,
+      controllerName: doc.controllerName ?? controllerName,
+      jobName: doc.jobName,
+      detectedAt: doc.detectedAt ? doc.detectedAt.toISOString() : "",
+      changeType: doc.changeType,
+      previousContentHash: doc.previousContentHash,
+      newContentHash: doc.newContentHash,
+    }));
+
+    const latestPayload =
+      latest && latest._id
+        ? {
+            eventId: String(latest._id),
+            detectedAt: latest.detectedAt ? new Date(latest.detectedAt).toISOString() : "",
+            changeType: latest.changeType,
+            previousContent:
+              typeof latest.previousContent === "string" ? latest.previousContent : "",
+            newContent: typeof latest.newContent === "string" ? latest.newContent : "",
+          }
+        : null;
+
+    return res.status(200).json({
+      success: true,
+      controllerId,
+      controllerName,
+      jobName,
+      latest: latestPayload,
+      events,
+    });
+  } catch (error) {
+    console.error("Error loading job diff hub:", error);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to load diff hub: ${error instanceof Error ? error.message : "Unknown error"}`,
     });
   }
 };
