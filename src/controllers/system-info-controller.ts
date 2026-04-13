@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import fs from "fs";
 import path from "path";
-import os from "os";
+
+import { WATCHLOG_BASE_DIR } from "../config/app-config.js";
 
 const getSystemInfoByControllerId = async (req: Request, res: Response) => {
   const { controllerId } = req.params;
@@ -21,9 +22,7 @@ const getSystemInfoByControllerId = async (req: Request, res: Response) => {
 
     const ipAddress = controllerResult.rows[0].ip_address;
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const systemInfoDir = path.join(baseDir, `${ipAddress}_SYSTEM`);
+    const systemInfoDir = path.join(WATCHLOG_BASE_DIR, `${ipAddress}_SYSTEM`);
 
     if (!fs.existsSync(systemInfoDir)) {
       return res.status(200).json({

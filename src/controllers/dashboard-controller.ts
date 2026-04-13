@@ -3,8 +3,9 @@ import { dbPool } from "../config/db";
 import { getMaintenanceIntervals } from "../utils/robot-maintenance-intervals";
 import { parseSystemFile } from "../utils/parse-system-file";
 import path from "path";
-import os from "os";
 import fs from "fs";
+
+import { WATCHLOG_BASE_DIR } from "../config/app-config.js";
 
 interface AlarmStats {
   hourlyData: { hour: string; count: number }[];
@@ -521,9 +522,6 @@ const getStats = async (req: Request, res: Response) => {
         lastMaintenanceMap.set(row.controller_id, row.servo_hours || 0);
       });
 
-      const baseDir =
-        process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
       // Calculate maintenance status for each controller
       for (const controller of controllersResult.rows) {
         const currentHours = controller.servo_power_time || 0;
@@ -533,7 +531,7 @@ const getStats = async (req: Request, res: Response) => {
         // Get robot model from system file
         let robotModel = null;
         try {
-          const systemInfoDir = path.join(baseDir, `${controller.ip_address}_SYSTEM`);
+          const systemInfoDir = path.join(WATCHLOG_BASE_DIR, `${controller.ip_address}_SYSTEM`);
           if (fs.existsSync(systemInfoDir)) {
             const files = fs.readdirSync(systemInfoDir);
             const systemFiles = files.filter(

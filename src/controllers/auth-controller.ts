@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { Request, Response } from "express";
 
+import { SECRET } from "../config/app-config.js";
 import { dbPool } from "../config/db";
 import { LoginRequestDto } from "../models/auth-dto";
 import { UserResponseDto } from "../models/user-dto";
@@ -47,12 +48,7 @@ const login = async (req: Request, res: Response) => {
       roleName: userData.roleName,
     };
 
-    const secret = process.env.SECRET;
-    if (!secret) {
-      throw new Error("SECRET environment variable is not defined");
-    }
-
-    const token = jwt.sign(tokenData, secret, {
+    const token = jwt.sign(tokenData, SECRET, {
       expiresIn: 24 * 60 * 60,
     });
 

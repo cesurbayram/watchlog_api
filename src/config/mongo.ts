@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/watchlog";
+import { MONGO_URI } from "./app-config.js";
 
 export async function connectMongoDB(): Promise<void> {
   try {

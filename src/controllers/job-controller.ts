@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
 import { dbPool } from "../config/db";
 import path from "path";
-import os from "os";
 import fs from "fs";
+
+import { WATCHLOG_BASE_DIR } from "../config/app-config.js";
 
 const getJobs = async (req: Request, res: Response) => {
   const { controllerId } = req.query;
@@ -49,11 +50,9 @@ const getJobFileContent = async (req: Request, res: Response) => {
 
     const ipAddress = controllerResult.rows[0].ip_address;
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
-
     const folderName = `${ipAddress}_${jobName}`;
     const fileName = `${jobName}.JBI`;
-    const filePath = path.join(baseDir, folderName, fileName);
+    const filePath = path.join(WATCHLOG_BASE_DIR, folderName, fileName);
 
     if (!fs.existsSync(filePath)) {
       return res.status(400).json({

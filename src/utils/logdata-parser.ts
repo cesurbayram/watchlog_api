@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
+
+import { WATCHLOG_BASE_DIR } from "../config/app-config.js";
 import { ParsedLogEntry } from "../models/logdata.dto";
 
 export function parseLogContent(content: string, maxEntries: number = 100): ParsedLogEntry[] {
@@ -99,10 +100,7 @@ export async function readLogDataFile(ipAddress: string): Promise<ParsedLogEntry
     const fileName = "LOGDATA.DAT";
     const folderName = `${ipAddress}_LOGDATA`;
 
-    const baseDir =
-      process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? path.join("C:", "Watchlog", "UI") : path.join(os.homedir(), "Watchlog", "UI"));
-
-    const filePath = path.join(baseDir, folderName, fileName);
+    const filePath = path.join(WATCHLOG_BASE_DIR, folderName, fileName);
 
     if (!fs.existsSync(filePath)) {
       return [];

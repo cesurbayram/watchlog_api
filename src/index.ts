@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
+import { PORT } from "./config/app-config.js";
 import { connectMongoDB } from "./config/mongo.js";
 import { LogPipelineService } from "./services/log-pipeline.service.js";
 import { AbsoDatPipelineService } from "./services/abso-dat-pipeline.service.js";
@@ -44,7 +45,7 @@ import machineConfigRoutes from "./routes/machine-config.js";
 import pageRoutes from "./routes/page.js";
 
 const app = express();
-const port = process.env.PORT ?? "3001";
+const port = PORT;
 
 const httpServer = createServer(app);
 

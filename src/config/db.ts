@@ -1,10 +1,12 @@
 import { Pool } from "pg";
 
+import { DB_DATABASE, DB_HOST, DB_PASSWORD, DB_USER } from "./app-config.js";
+
 export const dbPool = new Pool({
-  database: process.env.DB_DATABASE,
-  host: process.env.DB_HOST,
-  password: process.env.DB_PASSWORD,
+  database: DB_DATABASE,
+  host: DB_HOST,
+  password: DB_PASSWORD,
   port: 5432,
-  user: process.env.DB_USER,
+  user: DB_USER,
   //ssl: true,
 });

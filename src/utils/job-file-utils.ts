@@ -1,15 +1,11 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import os from "os";
+
+import { WATCHLOG_BASE_DIR } from "../config/app-config.js";
 
 export function getWatchlogBaseDir(): string {
-  return (
-    process.env.WATCHLOG_BASE_DIR ||
-    (process.platform === "win32"
-      ? path.join("C:", "Watchlog", "UI")
-      : path.join(os.homedir(), "Watchlog", "UI"))
-  );
+  return WATCHLOG_BASE_DIR;
 }
 
 export function getJobFilePath(ipAddress: string, jobName: string): string {

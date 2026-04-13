@@ -1,3 +1,4 @@
+import { NOTIFICATION_SERVER_URL } from "../config/app-config.js";
 import { dbPool } from "../config/db";
 import { v4 as uuidv4 } from "uuid";
 
@@ -39,7 +40,7 @@ export const broadcastAndInsertNotification = async ({ type, title, message, dat
     const newNotification = result.rows[0];
 
     try {
-      await fetch(`${process.env.NOTIFICATION_SERVER_URL}/notify`, {
+      await fetch(`${NOTIFICATION_SERVER_URL}/notify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
