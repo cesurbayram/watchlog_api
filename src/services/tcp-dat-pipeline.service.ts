@@ -105,16 +105,18 @@ export class TcpDatPipelineService {
     const controllerId = controller.id;
     const controllerName = controller.name;
 
-    const lastDoc = await TcpSnapshotModel.findOne({ controllerId })
-      .sort({ recordedAt: -1 })
-      .lean();
-
-    const lastTools = lastDoc?.tools as ParsedTool[] | undefined;
-    const hasChanged = !toolsEqual(tools, lastTools);
-
-    if (!hasChanged) {
-      console.log(`[TcpDatPipeline] No change for ${controllerName} (${ipAddress}), skipping insert`);
-      return;
+    const skipUnchanged = process.env.TCP_SNAPSHOT_SKIP_UNCHANGED === "true";
+    if (skipUnchanged) {
+      const lastDoc = await TcpSnapshotModel.findOne({ controllerId })
+        .sort({ recordedAt: -1 })
+        .lean();
+      const lastTools = lastDoc?.tools as ParsedTool[] | undefined;
+      if (toolsEqual(tools, lastTools)) {
+        console.log(
+          `[TcpDatPipeline] No change for ${controllerName} (${ipAddress}), skipping insert`
+        );
+        return;
+      }
     }
 
     const toolsData = tools.map((t) => ({
