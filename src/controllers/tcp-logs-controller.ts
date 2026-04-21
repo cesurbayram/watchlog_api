@@ -218,10 +218,7 @@ export const getTcpSnapshotsInRange = async (req: Request, res: Response) => {
       filter.recordedAt = range;
     }
 
-    const raw = await TcpSnapshotModel.find(filter)
-      .sort({ recordedAt: -1 })
-      .limit(500)
-      .lean();
+    const raw = await TcpSnapshotModel.find(filter).sort({ recordedAt: -1 }).lean();
 
     const toSnapshot = (doc: (typeof raw)[number]) => ({
       tools: doc.tools,

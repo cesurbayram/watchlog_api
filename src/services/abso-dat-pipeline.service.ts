@@ -83,16 +83,18 @@ export class AbsoDatPipelineService {
     const controllerId = controller.id;
     const controllerName = controller.name;
 
-    const lastDoc = await AbsoSnapshotModel.findOne({ controllerId })
-      .sort({ recordedAt: -1 })
-      .lean();
-
-    const lastValues = lastDoc?.currValue?.R1 as R1ParsedValues | undefined;
-    const hasChanged = !valuesEqual(currValue, lastValues);
-
-    if (!hasChanged) {
-      console.log(`[AbsoDatPipeline] No change for ${controllerName} (${ipAddress}), skipping insert`);
-      return;
+    const skipUnchanged = process.env.ABSO_SNAPSHOT_SKIP_UNCHANGED === "true";
+    if (skipUnchanged) {
+      const lastDoc = await AbsoSnapshotModel.findOne({ controllerId })
+        .sort({ recordedAt: -1 })
+        .lean();
+      const lastValues = lastDoc?.currValue?.R1 as R1ParsedValues | undefined;
+      if (valuesEqual(currValue, lastValues)) {
+        console.log(
+          `[AbsoDatPipeline] No change for ${controllerName} (${ipAddress}), skipping insert`
+        );
+        return;
+      }
     }
 
     const recordedAt = new Date();
