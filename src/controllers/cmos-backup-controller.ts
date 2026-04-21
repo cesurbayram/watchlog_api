@@ -3,6 +3,7 @@ import { dbPool } from "../config/db";
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { ON_PREM_WATCHLOG_BACKUP_DIR, ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config";
 import archiver from "archiver";
 import { handleAllControllers, parseLogContent } from "../utils/cmos-backup";
 
@@ -297,7 +298,7 @@ const createZipBySessionId = async (req: Request, res: Response) => {
     }
 
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     let controllerBackupDir: string | null = null;
     let backupFolderName: string | null = null;
@@ -439,7 +440,7 @@ const downloadZipBySessionId = async (req: Request, res: Response) => {
     const controllerIp = session.ip_address;
     const sessionTime = new Date(session.session_start_time);
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     let folderName: string | null = null;
     if (session.backup_folder_path && fs.existsSync(session.backup_folder_path)) {
@@ -631,7 +632,7 @@ const getLogFileContentByControllerId = async (req: Request, res: Response) => {
     const fileName = "LOGDATA.DAT";
     const folderName = `${ipAddress}_LOGDATA`;
 
-    const baseDir = process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+    const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
     const filePath = path.join(baseDir, folderName, fileName);
 
@@ -695,7 +696,7 @@ const getReadFileBySessionIdWithFileName = async (req: Request, res: Response) =
     const sessionTime = new Date(session.session_start_time);
 
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     let folderPath: string | null = null;
 
@@ -782,7 +783,7 @@ const getSessionFolderFilesBySessionId = async (req: Request, res: Response) => 
     const sessionTime = new Date(session.session_start_time);
 
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     let backupFolderPath: string | null = null;
 
@@ -881,7 +882,7 @@ const deleteBackupSessionBySessionId = async (req: Request, res: Response) => {
     const sessionTime = new Date(session.session_start_time);
 
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     let deletedFolderPath: string | null = null;
 
@@ -969,7 +970,7 @@ const getBackupFoldersForController = async (req: Request, res: Response) => {
 
     // Get backup base directory based on OS
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     // Check if backup directory exists
     if (!fs.existsSync(backupBaseDir)) {
@@ -1056,7 +1057,7 @@ const getBackupFolderFiles = async (req: Request, res: Response) => {
 
   try {
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     const folderPath = path.join(backupBaseDir, folderName);
 
@@ -1106,7 +1107,7 @@ const getBackupFileContent = async (req: Request, res: Response) => {
 
   try {
     const backupBaseDir =
-      process.env.WATCHLOG_BACKUP_DIR || (process.platform === "win32" ? "C:\\Watchlog\\Backup" : path.join(os.homedir(), "Watchlog", "Backup"));
+      ON_PREM_WATCHLOG_BACKUP_DIR;
 
     const filePath = path.join(backupBaseDir, folderName, fileName);
 

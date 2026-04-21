@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
+import { ON_PREM_MONGO_URI } from "./on-prem-config";
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/watchlog";
+const MONGO_URI = ON_PREM_MONGO_URI;
 
 export async function connectMongoDB(): Promise<void> {
   try {

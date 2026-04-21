@@ -2,13 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { parse } from "csv-parse/sync";
 import { SystemAlarmDetail } from "../models/alarm-error";
-import * as os from "os";
+import { ON_PREM_WATCHLOG_ALARM_DETAILS_DIR } from "../config/on-prem-config";
 
 function getAlarmDetailsDirectory(): string {
-  return (
-    process.env.WATCHLOG_ALARM_DETAILS_DIR ||
-    (process.platform === "win32" ? "C:\\Watchlog\\AlarmDetails" : path.join(os.homedir(), "Watchlog", "AlarmDetails"))
-  );
+  return ON_PREM_WATCHLOG_ALARM_DETAILS_DIR;
 }
 
 function getSystemCsvFileName(alarmCode: string): string {

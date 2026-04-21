@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { ParsedLogEntry } from "../models/logdata.dto";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config";
 
 export function parseLogContent(content: string, maxEntries: number = 100): ParsedLogEntry[] {
   const entries: ParsedLogEntry[] = [];
@@ -99,8 +99,7 @@ export async function readLogDataFile(ipAddress: string): Promise<ParsedLogEntry
     const fileName = "LOGDATA.DAT";
     const folderName = `${ipAddress}_LOGDATA`;
 
-    const baseDir =
-      process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? path.join("C:", "Watchlog", "UI") : path.join(os.homedir(), "Watchlog", "UI"));
+    const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
     const filePath = path.join(baseDir, folderName, fileName);
 

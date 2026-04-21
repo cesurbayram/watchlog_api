@@ -2,9 +2,9 @@ import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { dbPool } from "../config/db";
 import path from "path";
-import os from "os";
 import fs from "fs";
 import { parseSystemFile } from "../utils/parse-system-file";
+import { ON_PREM_WATCHLOG_BASE_DIR } from "../config/on-prem-config";
 
 const createShiftMaintenance = async (req: Request, res: Response) => {
   const { controller_id, maintenance_type, maintenance_date, servo_hours: provided_servo_hours, technician, notes } = req.body;
@@ -158,9 +158,7 @@ const getShiftMaintenanceController = async (req: Request, res: Response) => {
       let robot_model = null;
 
       try {
-        // Platform-agnostic base path
-        const baseDir =
-          process.env.WATCHLOG_BASE_DIR || (process.platform === "win32" ? "C:\\Watchlog\\UI" : path.join(os.homedir(), "Watchlog", "UI"));
+        const baseDir = ON_PREM_WATCHLOG_BASE_DIR;
 
         const systemInfoDir = path.join(baseDir, `${controller.ip_address}_SYSTEM`);
 

@@ -42,9 +42,10 @@ import absoLogsRoutes from "./routes/abso-logs.js";
 import roleRoutes from "./routes/role.js";
 import machineConfigRoutes from "./routes/machine-config.js";
 import pageRoutes from "./routes/page.js";
+import { ON_PREM_PORT } from "./config/on-prem-config.js";
 
 const app = express();
-const port = process.env.PORT ?? "3001";
+const port = ON_PREM_PORT;
 
 const httpServer = createServer(app);
 
