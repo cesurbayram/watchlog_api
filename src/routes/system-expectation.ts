@@ -62,6 +62,11 @@ import {
   getDataFetchScheduleByType,
   updateDataFetchSchedule,
 } from "../controllers/data-fetch-schedule-controller";
+import {
+  getTcpPoseTriggerConfig,
+  upsertTcpPoseTriggerConfig,
+  getTcpPoseTriggerLogs,
+} from "../controllers/tcp-pose-trigger-controller";
 
 const systemExpectationRouter = Router();
 
@@ -92,6 +97,9 @@ systemExpectationRouter.get("/tcp-logs/:controllerId/from-db", getTcpEventsFromD
 systemExpectationRouter.get("/tcp-logs/:controllerId/history", getTcpHistory);
 systemExpectationRouter.get("/tcp-logs/:controllerId/check", checkTcpData);
 systemExpectationRouter.get("/tcp-logs-summary", getAllControllersTcpSummaryEndpoint);
+systemExpectationRouter.get("/tcp-pose-trigger/:controllerId/logs", getTcpPoseTriggerLogs);
+systemExpectationRouter.get("/tcp-pose-trigger/:controllerId", getTcpPoseTriggerConfig);
+systemExpectationRouter.put("/tcp-pose-trigger/:controllerId", upsertTcpPoseTriggerConfig);
 systemExpectationRouter.get("/abso-logs/:controllerId", getAbsoLogsByControllerId);
 systemExpectationRouter.get("/abso-logs/:controllerId/from-db", getAbsoEventsFromDatabase);
 systemExpectationRouter.get("/abso-logs/:controllerId/history", getAbsoHistory);
